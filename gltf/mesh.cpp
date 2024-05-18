@@ -301,7 +301,7 @@ void mergeMeshes(std::vector<Mesh>& meshes, const Settings& settings)
 	{
 		Mesh& target = meshes[i];
 
-		if (target.streams.empty())
+		if (settings.keep_mesh_primitives || target.streams.empty())
 			continue;
 
 		size_t target_vertices = target.streams[0].data.size();

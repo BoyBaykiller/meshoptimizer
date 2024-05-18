@@ -128,6 +128,7 @@ struct Settings
 
 	bool keep_nodes;
 	bool keep_materials;
+	bool keep_mesh_primitives;
 	bool keep_extras;
 
 	bool mesh_merge;

@@ -89,6 +89,27 @@ static void fillParams(basisu::basis_compressor_params& params, const char* inpu
 	params.m_source_filenames.resize(1);
 	params.m_source_filenames[0] = input;
 
+	// The following swizzles allow for easy BC5 transcoding.
+	// BC5 expects the original R channel to be in R and the original B channel to be in A.
+
+	if (info.kind == TextureKind_Normal)
+	{
+		// Put X in RGB and Y in A.
+		params.m_swizzle[0] = 0;
+		params.m_swizzle[1] = 0;
+		params.m_swizzle[2] = 0;
+		params.m_swizzle[3] = 1;
+	}
+	if (info.kind == TextureKind_Attrib)
+	{
+		// By the glTF spec "The metalness values are sampled from the B channel. The roughness values are sampled from the G channel".
+		// Put metalness in RGB and roughness in A.
+		params.m_swizzle[0] = 2;
+		params.m_swizzle[1] = 2;
+		params.m_swizzle[2] = 2;
+		params.m_swizzle[3] = 1;
+	}
+
 	params.m_out_filename = output;
 
 	params.m_status_output = false;

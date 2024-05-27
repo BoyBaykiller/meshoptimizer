@@ -281,7 +281,10 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 	for (size_t i = 0; i < meshes.size(); ++i)
 	{
 		Mesh& mesh = meshes[i];
-		assert(mesh.instances.empty());
+
+		// mesh is already instanced, skip
+		if (!mesh.instances.empty())
+			continue;
 
 		// mesh is already world space, skip
 		if (mesh.nodes.empty())
@@ -452,6 +455,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 	bool ext_unlit = false;
 	bool ext_instancing = false;
 	bool ext_texture_transform = false;
+	bool ext_texture_basisu = false;
 
 	size_t accr_offset = 0;
 	size_t node_offset = 0;
@@ -509,6 +513,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 
 		assert(textures[i].remap == int(texture_offset));
 		texture_offset++;
+		ext_texture_basisu = ext_texture_basisu || texture.has_basisu;
 	}
 
 	for (size_t i = 0; i < data->materials_count; ++i)
@@ -662,9 +667,6 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 
 		append(json_meshes, "}");
 
-		assert(mesh.nodes.empty() || mesh.instances.empty());
-		ext_instancing = ext_instancing || !mesh.instances.empty();
-
 		if (mesh.nodes.size())
 		{
 			for (size_t j = 0; j < mesh.nodes.size(); ++j)
@@ -689,7 +691,8 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 				}
 			}
 		}
-		else if (mesh.instances.size())
+
+		if (mesh.instances.size())
 		{
 			assert(mesh.scene >= 0);
 			comma(json_roots[mesh.scene]);
@@ -702,7 +705,8 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 
 			node_offset++;
 		}
-		else
+
+		if (mesh.nodes.empty() && mesh.instances.empty())
 		{
 			assert(mesh.scene >= 0);
 			comma(json_roots[mesh.scene]);
@@ -714,6 +718,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 		}
 
 		mesh_offset++;
+		ext_instancing = ext_instancing || !mesh.instances.empty();
 
 		// skip all meshes that we've written in this iteration
 		assert(pi > i);
@@ -834,7 +839,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 	    {"KHR_materials_unlit", ext_unlit, false},
 	    {"KHR_materials_variants", data->variants_count > 0, false},
 	    {"KHR_lights_punctual", data->lights_count > 0, false},
-	    {"KHR_texture_basisu", !json_textures.empty() && settings.texture_ktx2, true},
+	    {"KHR_texture_basisu", (!json_textures.empty() && settings.texture_ktx2) || ext_texture_basisu, true},
 	    {"EXT_mesh_gpu_instancing", ext_instancing, true},
 
 		// Don't require because of: https://github.com/vpenades/SharpGLTF/issues/237

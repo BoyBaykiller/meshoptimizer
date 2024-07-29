@@ -11,10 +11,10 @@ static bool areTexturesEqual(const cgltf_texture& lhs, const cgltf_texture& rhs)
 	if (lhs.sampler != rhs.sampler)
 		return false;
 
-	if (lhs.has_basisu != rhs.has_basisu)
+	if (lhs.basisu_image != rhs.basisu_image)
 		return false;
 
-	if (lhs.basisu_image != rhs.basisu_image)
+	if (lhs.webp_image != rhs.webp_image)
 		return false;
 
 	return true;
@@ -446,28 +446,30 @@ static const cgltf_image* getTextureImage(const cgltf_texture* texture)
 	if (texture && texture->image)
 		return texture->image;
 
-	if (texture && texture->has_basisu && texture->basisu_image)
+	if (texture && texture->basisu_image)
 		return texture->basisu_image;
+
+	if (texture && texture->webp_image)
+		return texture->webp_image;
 
 	return NULL;
 }
 
 static void analyzeMaterialTexture(const cgltf_texture_view& view, TextureKind kind, MaterialInfo& mi, cgltf_data* data, std::vector<TextureInfo>& textures, std::vector<ImageInfo>& images)
 {
-	mi.usesTextureTransform |= hasValidTransform(view);
+	mi.uses_texture_transform |= hasValidTransform(view);
 
 	if (view.texture)
 	{
 		textures[view.texture - data->textures].keep = true;
 
-		mi.textureSetMask |= 1u << view.texcoord;
-		mi.needsTangents |= (kind == TextureKind_Normal);
+		mi.texture_set_mask |= 1u << view.texcoord;
+		mi.needs_tangents |= (kind == TextureKind_Normal);
 	}
 
 	if (const cgltf_image* image = getTextureImage(view.texture))
 	{
 		ImageInfo& info = images[image - data->images];
-
 
 		if (info.kind == TextureKind_Generic)
 			info.kind = kind;

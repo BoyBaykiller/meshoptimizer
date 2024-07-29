@@ -20,7 +20,7 @@ LIBRARY=$(BUILD)/libmeshoptimizer.a
 DEMO=$(BUILD)/meshoptimizer
 
 CFLAGS=-g -Wall -Wextra -Werror -std=c89
-CXXFLAGS=-g -Wall -Wextra -Wshadow -Wno-missing-field-initializers -Werror -std=c++98
+CXXFLAGS=-g -Wall -Wextra -Wshadow -Wno-missing-field-initializers -Werror -std=gnu++98
 LDFLAGS=
 
 $(GLTFPACK_OBJECTS): CXXFLAGS+=-std=c++11
@@ -40,6 +40,7 @@ WASIROOT?=$(WASI_SDK)/share/wasi-sysroot
 
 WASM_FLAGS=--target=wasm32-wasi --sysroot=$(WASIROOT)
 WASM_FLAGS+=-O3 -DNDEBUG -nostartfiles -nostdlib -Wl,--no-entry -Wl,-s
+WASM_FLAGS+=-mcpu=mvp # make sure clang doesn't use post-MVP features like sign extension
 WASM_FLAGS+=-fno-slp-vectorize -fno-vectorize -fno-unroll-loops
 WASM_FLAGS+=-Wl,-z -Wl,stack-size=24576 -Wl,--initial-memory=65536
 WASM_EXPORT_PREFIX=-Wl,--export
@@ -107,7 +108,13 @@ dev: $(DEMO)
 format:
 	clang-format -i $(LIBRARY_SOURCES) $(DEMO_SOURCES) $(GLTFPACK_SOURCES)
 
+formatjs:
+	prettier -w js/*.js gltf/*.js demo/*.html js/*.ts
+
 js: js/meshopt_decoder.js js/meshopt_decoder.module.js js/meshopt_encoder.js js/meshopt_encoder.module.js js/meshopt_simplifier.js js/meshopt_simplifier.module.js
+
+symbols: $(BUILD)/amalgamated.so
+	nm $< -U -g
 
 gltfpack: $(BUILD)/gltfpack
 	ln -fs $^ $@
@@ -125,7 +132,7 @@ $(BUILD)/gltfpack: $(GLTFPACK_OBJECTS) $(LIBRARY)
 
 gltfpack.wasm: gltf/library.wasm
 
-gltf/library.wasm: ${LIBRARY_SOURCES} ${GLTFPACK_SOURCES}
+gltf/library.wasm: $(LIBRARY_SOURCES) $(GLTFPACK_SOURCES)
 	$(WASMCC) $^ -o $@ -Os -DNDEBUG --target=wasm32-wasi --sysroot=$(WASIROOT) -nostartfiles -Wl,--no-entry -Wl,--export=pack -Wl,--export=malloc -Wl,--export=free -Wl,--export=__wasm_call_ctors -Wl,-s -Wl,--allow-undefined-file=gltf/wasistubs.txt
 
 build/decoder_base.wasm: $(WASM_DECODER_SOURCES)
@@ -147,23 +154,23 @@ build/simplifier.wasm: $(WASM_SIMPLIFIER_SOURCES)
 js/meshopt_decoder.js: build/decoder_base.wasm build/decoder_simd.wasm tools/wasmpack.py
 	sed -i "s#Built with clang.*#Built with $$($(WASMCC) --version | head -n 1 | sed 's/\s\+(.*//')#" $@
 	sed -i "s#Built from meshoptimizer .*#Built from meshoptimizer $$(cat src/meshoptimizer.h | grep -Po '(?<=version )[0-9.]+')#" $@
-	sed -i "s#\(var wasm_base = \)\".*\";#\\1\"$$(cat build/decoder_base.wasm | python3 tools/wasmpack.py)\";#" $@
-	sed -i "s#\(var wasm_simd = \)\".*\";#\\1\"$$(cat build/decoder_simd.wasm | python3 tools/wasmpack.py)\";#" $@
+	sed -i "s#\([\"']\).*\(;\s*//\s*embed! base\)#\\1$$(cat build/decoder_base.wasm | python3 tools/wasmpack.py)\\1\\2#" $@
+	sed -i "s#\([\"']\).*\(;\s*//\s*embed! simd\)#\\1$$(cat build/decoder_simd.wasm | python3 tools/wasmpack.py)\\1\\2#" $@
 
 js/meshopt_encoder.js: build/encoder.wasm tools/wasmpack.py
 	sed -i "s#Built with clang.*#Built with $$($(WASMCC) --version | head -n 1 | sed 's/\s\+(.*//')#" $@
 	sed -i "s#Built from meshoptimizer .*#Built from meshoptimizer $$(cat src/meshoptimizer.h | grep -Po '(?<=version )[0-9.]+')#" $@
-	sed -i "s#\(var wasm = \)\".*\";#\\1\"$$(cat build/encoder.wasm | python3 tools/wasmpack.py)\";#" $@
+	sed -i "s#\([\"']\).*\(;\s*//\s*embed! wasm\)#\\1$$(cat build/encoder.wasm | python3 tools/wasmpack.py)\\1\\2#" $@
 
 js/meshopt_simplifier.js: build/simplifier.wasm tools/wasmpack.py
 	sed -i "s#Built with clang.*#Built with $$($(WASMCC) --version | head -n 1 | sed 's/\s\+(.*//')#" $@
 	sed -i "s#Built from meshoptimizer .*#Built from meshoptimizer $$(cat src/meshoptimizer.h | grep -Po '(?<=version )[0-9.]+')#" $@
-	sed -i "s#\(var wasm = \)\".*\";#\\1\"$$(cat build/simplifier.wasm | python3 tools/wasmpack.py)\";#" $@
+	sed -i "s#\([\"']\).*\(;\s*//\s*embed! wasm\)#\\1$$(cat build/simplifier.wasm | python3 tools/wasmpack.py)\\1\\2#" $@
 
 js/%.module.js: js/%.js
-	sed '/UMD-style export/,$$d' <$< >$@
-	sed -i "/\"use strict\";/d" $@
-	sed -n "s#\s*module.exports = \(.*\);#export { \\1 };#p" <$< >>$@
+	sed '\#// export!#q' <$< >$@
+	sed -i "/use strict.;/d" $@
+	sed -i "s#// export! \(.*\)#export { \\1 };#" $@
 
 $(DEMO): $(DEMO_OBJECTS) $(LIBRARY)
 	$(CXX) $^ $(LDFLAGS) -o $@
@@ -174,16 +181,16 @@ vcachetuner: tools/vcachetuner.cpp tools/objloader.cpp $(LIBRARY)
 codecbench: tools/codecbench.cpp $(LIBRARY)
 	$(CXX) $^ $(CXXFLAGS) $(LDFLAGS) -o $@
 
-codecbench.js: tools/codecbench.cpp ${LIBRARY_SOURCES}
+codecbench.js: tools/codecbench.cpp $(LIBRARY_SOURCES)
 	emcc $^ -O3 -g -DNDEBUG -s TOTAL_MEMORY=268435456 -s SINGLE_FILE=1 -o $@
 
-codecbench-simd.js: tools/codecbench.cpp ${LIBRARY_SOURCES}
+codecbench-simd.js: tools/codecbench.cpp $(LIBRARY_SOURCES)
 	emcc $^ -O3 -g -DNDEBUG -s TOTAL_MEMORY=268435456 -s SINGLE_FILE=1 -msimd128 -o $@
 
-codecbench.wasm: tools/codecbench.cpp ${LIBRARY_SOURCES}
+codecbench.wasm: tools/codecbench.cpp $(LIBRARY_SOURCES)
 	$(WASMCC) $^ -fno-exceptions --target=wasm32-wasi --sysroot=$(WASIROOT) -lc++ -lc++abi -O3 -g -DNDEBUG -o $@
 
-codecbench-simd.wasm: tools/codecbench.cpp ${LIBRARY_SOURCES}
+codecbench-simd.wasm: tools/codecbench.cpp $(LIBRARY_SOURCES)
 	$(WASMCC) $^ -fno-exceptions --target=wasm32-wasi --sysroot=$(WASIROOT) -lc++ -lc++abi -O3 -g -DNDEBUG -msimd128 -o $@
 
 codecfuzz: tools/codecfuzz.cpp src/vertexcodec.cpp src/indexcodec.cpp
@@ -191,6 +198,10 @@ codecfuzz: tools/codecfuzz.cpp src/vertexcodec.cpp src/indexcodec.cpp
 
 $(LIBRARY): $(LIBRARY_OBJECTS)
 	ar rcs $@ $^
+
+$(BUILD)/amalgamated.so: $(LIBRARY_SOURCES)
+	@mkdir -p $(dir $@)
+	cat $^ | $(CXX) $(CXXFLAGS) -x c++ - -I src/ -o $@ -shared -fPIC
 
 $(BUILD)/%.cpp.o: %.cpp
 	@mkdir -p $(dir $@)

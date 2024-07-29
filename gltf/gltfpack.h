@@ -1,5 +1,5 @@
 /**
- * gltfpack - version 0.20
+ * gltfpack - version 0.21
  *
  * Copyright (C) 2016-2024, by Arseny Kapoulkine (arseny.kapoulkine@gmail.com)
  * Report bugs and download new versions at https://github.com/zeux/meshoptimizer
@@ -130,6 +130,7 @@ struct Settings
 	bool keep_materials;
 	bool keep_mesh_primitives;
 	bool keep_extras;
+	bool keep_attributes;
 
 	bool mesh_merge;
 	bool mesh_instancing;
@@ -171,6 +172,8 @@ struct QuantizationPosition
 	float scale;
 	int bits;
 	bool normalized;
+
+	float node_scale; // computed from scale/bits/normalized
 };
 
 struct QuantizationTexture
@@ -205,7 +208,7 @@ struct NodeInfo
 	bool keep;
 	bool animated;
 
-	unsigned int animated_paths;
+	unsigned int animated_path_mask;
 
 	int remap;
 
@@ -220,11 +223,11 @@ struct MaterialInfo
 {
 	bool keep;
 
-	bool usesTextureTransform;
-	bool needsTangents;
+	bool uses_texture_transform;
+	bool needs_tangents;
 	bool unlit;
 
-	unsigned int textureSetMask;
+	unsigned int texture_set_mask;
 
 	int remap;
 };
@@ -305,7 +308,7 @@ void processAnimation(Animation& animation, const Settings& settings);
 void processMesh(Mesh& mesh, const Settings& settings);
 
 void debugSimplify(const Mesh& mesh, Mesh& kinds, Mesh& loops, float ratio, bool attributes);
-void debugMeshlets(const Mesh& mesh, Mesh& meshlets, Mesh& bounds, int max_vertices, bool scan);
+void debugMeshlets(const Mesh& mesh, Mesh& meshlets, int max_vertices, bool scan);
 
 bool compareMeshTargets(const Mesh& lhs, const Mesh& rhs);
 bool compareMeshVariants(const Mesh& lhs, const Mesh& rhs);

@@ -76,66 +76,66 @@ Mesh parseObj(const char* path, double& reindex)
 		return Mesh();
 	}
 
+	reindex = timestamp();
+
 	size_t total_indices = 0;
 
 	for (unsigned int i = 0; i < obj->face_count; ++i)
 		total_indices += 3 * (obj->face_vertices[i] - 2);
 
-	std::vector<Vertex> vertices(total_indices);
+	size_t face_vertex_count = obj->index_count;
+
+	std::vector<unsigned int> remap(face_vertex_count);
+	size_t unique_vertices = meshopt_generateVertexRemap(&remap[0], NULL, face_vertex_count, obj->indices, face_vertex_count, sizeof(fastObjIndex));
+
+	Mesh mesh;
+	mesh.vertices.resize(unique_vertices);
+	mesh.indices.resize(total_indices);
+
+	for (unsigned int vi = 0; vi < face_vertex_count; ++vi)
+	{
+		unsigned int target = remap[vi];
+		// TODO: this fills every target vertex multiple times
+
+		fastObjIndex ii = obj->indices[vi];
+
+		Vertex v = {
+		    obj->positions[ii.p * 3 + 0],
+		    obj->positions[ii.p * 3 + 1],
+		    obj->positions[ii.p * 3 + 2],
+		    obj->normals[ii.n * 3 + 0],
+		    obj->normals[ii.n * 3 + 1],
+		    obj->normals[ii.n * 3 + 2],
+		    obj->texcoords[ii.t * 2 + 0],
+		    obj->texcoords[ii.t * 2 + 1],
+		};
+
+		mesh.vertices[target] = v;
+	}
 
 	size_t vertex_offset = 0;
 	size_t index_offset = 0;
 
-	for (unsigned int i = 0; i < obj->face_count; ++i)
+	for (unsigned int fi = 0; fi < obj->face_count; ++fi)
 	{
-		for (unsigned int j = 0; j < obj->face_vertices[i]; ++j)
+		unsigned int face_vertices = obj->face_vertices[fi];
+
+		for (unsigned int vi = 2; vi < face_vertices; ++vi)
 		{
-			fastObjIndex gi = obj->indices[index_offset + j];
+			size_t to = index_offset + (vi - 2) * 3;
 
-			Vertex v =
-			    {
-			        obj->positions[gi.p * 3 + 0],
-			        obj->positions[gi.p * 3 + 1],
-			        obj->positions[gi.p * 3 + 2],
-			        obj->normals[gi.n * 3 + 0],
-			        obj->normals[gi.n * 3 + 1],
-			        obj->normals[gi.n * 3 + 2],
-			        obj->texcoords[gi.t * 2 + 0],
-			        obj->texcoords[gi.t * 2 + 1],
-			    };
-
-			// triangulate polygon on the fly; offset-3 is always the first polygon vertex
-			if (j >= 3)
-			{
-				vertices[vertex_offset + 0] = vertices[vertex_offset - 3];
-				vertices[vertex_offset + 1] = vertices[vertex_offset - 1];
-				vertex_offset += 2;
-			}
-
-			vertices[vertex_offset] = v;
-			vertex_offset++;
+			mesh.indices[to + 0] = remap[vertex_offset];
+			mesh.indices[to + 1] = remap[vertex_offset + vi - 1];
+			mesh.indices[to + 2] = remap[vertex_offset + vi];
 		}
 
-		index_offset += obj->face_vertices[i];
+		vertex_offset += face_vertices;
+		index_offset += (face_vertices - 2) * 3;
 	}
 
 	fast_obj_destroy(obj);
 
-	reindex = timestamp();
-
-	Mesh result;
-
-	std::vector<unsigned int> remap(total_indices);
-
-	size_t total_vertices = meshopt_generateVertexRemap(&remap[0], NULL, total_indices, &vertices[0], total_indices, sizeof(Vertex));
-
-	result.indices.resize(total_indices);
-	meshopt_remapIndexBuffer(&result.indices[0], NULL, total_indices, &remap[0]);
-
-	result.vertices.resize(total_vertices);
-	meshopt_remapVertexBuffer(&result.vertices[0], &vertices[0], total_indices, sizeof(Vertex), &remap[0]);
-
-	return result;
+	return mesh;
 }
 
 void dumpObj(const Mesh& mesh, bool recomputeNormals = false)
@@ -522,6 +522,8 @@ void simplifyPoints(const Mesh& mesh, float threshold = 0.2f)
 	double start = timestamp();
 
 	size_t target_vertex_count = size_t(mesh.vertices.size() * threshold);
+	if (target_vertex_count == 0)
+		return;
 
 	std::vector<unsigned int> indices(target_vertex_count);
 	indices.resize(meshopt_simplifyPoints(&indices[0], &mesh.vertices[0].px, mesh.vertices.size(), sizeof(Vertex), NULL, 0, 0, target_vertex_count));
@@ -639,6 +641,61 @@ void simplifyComplete(const Mesh& mesh)
 		    double(vbuf.size()) / double(vertices.size()) * 8,
 		    double(ibuf.size()) / double(indices.size() / 3) * 8);
 	}
+}
+
+void simplifyClusters(const Mesh& mesh, float threshold = 0.2f)
+{
+	// note: we use clusters that are larger than normal to give simplifier room to work; in practice you'd use cluster groups merged from smaller clusters and build a cluster DAG
+	const size_t max_vertices = 255;
+	const size_t max_triangles = 512;
+
+	double start = timestamp();
+
+	size_t max_meshlets = meshopt_buildMeshletsBound(mesh.indices.size(), max_vertices, max_triangles);
+	std::vector<meshopt_Meshlet> meshlets(max_meshlets);
+	std::vector<unsigned int> meshlet_vertices(max_meshlets * max_vertices);
+	std::vector<unsigned char> meshlet_triangles(max_meshlets * max_triangles * 3);
+
+	meshlets.resize(meshopt_buildMeshlets(&meshlets[0], &meshlet_vertices[0], &meshlet_triangles[0], &mesh.indices[0], mesh.indices.size(), &mesh.vertices[0].px, mesh.vertices.size(), sizeof(Vertex), max_vertices, max_triangles, 0.f));
+
+	double middle = timestamp();
+
+	float scale = meshopt_simplifyScale(&mesh.vertices[0].px, mesh.vertices.size(), sizeof(Vertex));
+
+	std::vector<unsigned int> lod;
+	lod.reserve(mesh.indices.size());
+
+	float error = 0.f;
+
+	for (size_t i = 0; i < meshlets.size(); ++i)
+	{
+		const meshopt_Meshlet& m = meshlets[i];
+
+		size_t cluster_offset = lod.size();
+
+		for (size_t j = 0; j < m.triangle_count * 3; ++j)
+			lod.push_back(meshlet_vertices[m.vertex_offset + meshlet_triangles[m.triangle_offset + j]]);
+
+		unsigned int options = meshopt_SimplifyLockBorder | meshopt_SimplifySparse | meshopt_SimplifyErrorAbsolute;
+
+		float cluster_target_error = 1e-2f * scale;
+		size_t cluster_target = size_t(float(m.triangle_count) * threshold) * 3;
+		float cluster_error = 0.f;
+		size_t cluster_size = meshopt_simplify(&lod[cluster_offset], &lod[cluster_offset], m.triangle_count * 3, &mesh.vertices[0].px, mesh.vertices.size(), sizeof(Vertex), cluster_target, cluster_target_error, options, &cluster_error);
+
+		error = cluster_error > error ? cluster_error : error;
+
+		// simplified cluster is available in lod[cluster_offset..cluster_offset + cluster_size]
+		lod.resize(cluster_offset + cluster_size);
+	}
+
+	double end = timestamp();
+
+	printf("%-9s: %d triangles => %d triangles (%.2f%% deviation) in %.2f msec, clusterized in %.2f msec\n",
+	    "SimplifyN", // N for Nanite
+	    int(mesh.indices.size() / 3), int(lod.size() / 3),
+	    error / scale * 100,
+	    (end - middle) * 1000, (middle - start) * 1000);
 }
 
 void optimize(const Mesh& mesh, const char* name, void (*optf)(Mesh& mesh))
@@ -1231,6 +1288,7 @@ void process(const char* path)
 	simplifySloppy(mesh);
 	simplifyComplete(mesh);
 	simplifyPoints(mesh);
+	simplifyClusters(mesh);
 
 	spatialSort(mesh);
 	spatialSortTriangles(mesh);
@@ -1245,11 +1303,7 @@ void processDev(const char* path)
 	if (!loadMesh(mesh, path))
 		return;
 
-	Mesh copy = mesh;
-	meshopt_optimizeVertexCache(&copy.indices[0], &copy.indices[0], copy.indices.size(), copy.vertices.size());
-	meshopt_optimizeVertexFetch(&copy.vertices[0], &copy.indices[0], copy.indices.size(), &copy.vertices[0], copy.vertices.size(), sizeof(Vertex));
-
-	meshlets(copy, false);
+	simplifyAttr(mesh);
 }
 
 int main(int argc, char** argv)

@@ -2,6 +2,7 @@
 #include "gltfpack.h"
 
 #include <algorithm>
+#include <unordered_map>
 
 #include <locale.h>
 #include <stdint.h>
@@ -87,12 +88,14 @@ static void printMeshStats(const std::vector<Mesh>& meshes, const char* name)
 	{
 		const Mesh& mesh = meshes[i];
 
-		mesh_triangles += mesh.indices.size() / 3;
+		size_t triangles = mesh.type == cgltf_primitive_type_triangles ? mesh.indices.size() / 3 : 0;
+
+		mesh_triangles += triangles;
 		mesh_vertices += mesh.streams.empty() ? 0 : mesh.streams[0].data.size();
 
 		size_t instances = std::max(size_t(1), mesh.nodes.size() + mesh.instances.size());
 
-		total_triangles += mesh.indices.size() / 3 * instances;
+		total_triangles += triangles * instances;
 		total_instances += instances;
 		total_draws += std::max(size_t(1), mesh.nodes.size());
 	}
@@ -199,9 +202,10 @@ static bool printReport(const char* path, const std::vector<BufferView>& views, 
 	{
 		const Mesh& mesh = meshes[i];
 
+		size_t triangles = mesh.type == cgltf_primitive_type_triangles ? mesh.indices.size() / 3 : 0;
 		size_t instances = std::max(size_t(1), mesh.nodes.size() + mesh.instances.size());
 
-		total_triangles += mesh.indices.size() / 3 * instances;
+		total_triangles += triangles * instances;
 		total_instances += instances;
 		total_draws += std::max(size_t(1), mesh.nodes.size());
 	}
@@ -292,6 +296,10 @@ static void detachMesh(Mesh& mesh, cgltf_data* data, const std::vector<NodeInfo>
 	if (mesh.nodes.size() > 1 && !settings.mesh_merge && !settings.mesh_instancing)
 		return;
 
+	// mesh has duplicate geometry; detaching it would increase the size due to unique world-space transforms
+	if (mesh.nodes.size() == 1 && mesh.geometry_duplicate && !settings.mesh_merge)
+		return;
+
 	// prefer instancing if possible, use merging otherwise
 	if (mesh.nodes.size() > 1 && settings.mesh_instancing)
 	{
@@ -321,6 +329,18 @@ static bool isExtensionSupported(const ExtensionInfo* extensions, size_t count, 
 	return false;
 }
 
+namespace std
+{
+template <>
+struct hash<std::pair<uint64_t, uint64_t> >
+{
+	size_t operator()(const std::pair<uint64_t, uint64_t>& x) const
+	{
+		return std::hash<uint64_t>()(x.first ^ x.second);
+	}
+};
+} // namespace std
+
 static void process(cgltf_data* data, const char* input_path, const char* output_path, const char* report_path, std::vector<Mesh>& meshes, std::vector<Animation>& animations, const Settings& settings, std::string& json, std::string& bin, std::string& fallback, size_t& fallback_size)
 {
 	if (settings.verbose)
@@ -337,6 +357,10 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 
 	markScenes(data, nodes);
 	markAnimated(data, nodes, animations);
+
+	mergeMeshMaterials(data, meshes, settings);
+	if (settings.mesh_dedup)
+		dedupMeshes(meshes);
 
 	for (size_t i = 0; i < meshes.size(); ++i)
 		detachMesh(meshes[i], data, nodes, settings);
@@ -372,7 +396,6 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 			filterStreams(mesh, mi);
 	}
 
-	mergeMeshMaterials(data, meshes, settings);
 	mergeMeshes(meshes, settings);
 	filterEmptyMeshes(meshes);
 
@@ -390,7 +413,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 		{
 			Mesh kinds = {};
 			Mesh loops = {};
-			debugSimplify(mesh, kinds, loops, settings.simplify_debug, settings.simplify_attributes);
+			debugSimplify(mesh, kinds, loops, settings.simplify_debug, settings.simplify_error, settings.simplify_attributes, settings.quantize && !settings.nrm_float);
 			debug_meshes.push_back(kinds);
 			debug_meshes.push_back(loops);
 		}
@@ -405,7 +428,13 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 #endif
 
 	for (size_t i = 0; i < meshes.size(); ++i)
-		processMesh(meshes[i], settings);
+	{
+		Mesh& mesh = meshes[i];
+		processMesh(mesh, settings);
+
+		if (mesh.geometry_duplicate)
+			hashMesh(mesh);
+	}
 
 #ifndef NDEBUG
 	meshes.insert(meshes.end(), debug_meshes.begin(), debug_meshes.end());
@@ -548,6 +577,8 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 		ext_texture_transform = ext_texture_transform || mi.uses_texture_transform;
 	}
 
+	std::unordered_map<std::pair<uint64_t, uint64_t>, std::pair<size_t, size_t> > primitive_cache;
+
 	for (size_t i = 0; i < meshes.size(); ++i)
 	{
 		const Mesh& mesh = meshes[i];
@@ -575,33 +606,26 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 			const QuantizationTexture& qt = qt_meshes[pi] == size_t(-1) ? qt_dummy : qt_materials[qt_meshes[pi]];
 
 			comma(json_meshes);
-			append(json_meshes, "{\"attributes\":{");
-			writeMeshAttributes(json_meshes, views, json_accessors, accr_offset, prim, 0, qp, qt, settings);
-			append(json_meshes, "}");
-			if (prim.type != cgltf_primitive_type_triangles)
+
+			if (prim.geometry_duplicate)
 			{
-				append(json_meshes, ",\"mode\":");
-				append(json_meshes, size_t(prim.type - cgltf_primitive_type_points));
-			}
-			if (mesh.targets)
-			{
-				append(json_meshes, ",\"targets\":[");
-				for (size_t j = 0; j < mesh.targets; ++j)
+				std::pair<size_t, size_t>& primitive_json = primitive_cache[std::make_pair(prim.geometry_hash[0], prim.geometry_hash[1])];
+
+				if (primitive_json.second)
 				{
-					comma(json_meshes);
-					append(json_meshes, "{");
-					writeMeshAttributes(json_meshes, views, json_accessors, accr_offset, prim, int(1 + j), qp, qt, settings);
-					append(json_meshes, "}");
+					// reuse previously written accessors
+					json_meshes.append(json_meshes, primitive_json.first, primitive_json.second);
 				}
-				append(json_meshes, "]");
+				else
+				{
+					primitive_json.first = json_meshes.size();
+					writeMeshGeometry(json_meshes, views, json_accessors, accr_offset, prim, qp, qt, settings);
+					primitive_json.second = json_meshes.size() - primitive_json.first;
+				}
 			}
-
-			if (!prim.indices.empty())
+			else
 			{
-				size_t index_accr = writeMeshIndices(views, json_accessors, accr_offset, prim, settings);
-
-				append(json_meshes, ",\"indices\":");
-				append(json_meshes, index_accr);
+				writeMeshGeometry(json_meshes, views, json_accessors, accr_offset, prim, qp, qt, settings);
 			}
 
 			if (prim.material)
@@ -1177,7 +1201,9 @@ Settings defaults()
 	settings.rot_bits = 12;
 	settings.scl_bits = 16;
 	settings.anim_freq = 30;
-	settings.simplify_threshold = 1.f;
+	settings.mesh_dedup = true;
+	settings.simplify_ratio = 1.f;
+	settings.simplify_error = 1e-2f;
 	settings.texture_scale = 1.f;
 	for (int kind = 0; kind < TextureKind__Count; ++kind)
 		settings.texture_quality[kind] = 8;
@@ -1317,6 +1343,11 @@ int main(int argc, char** argv)
 		{
 			settings.keep_attributes = true;
 		}
+		else if (strcmp(arg, "-mdd") == 0)
+		{
+			fprintf(stderr, "Warning: option -mdd disables mesh deduplication and is only provided as a safety measure; it will be removed in the future\n");
+			settings.mesh_dedup = false;
+		}
 		else if (strcmp(arg, "-mm") == 0)
 		{
 			settings.mesh_merge = true;
@@ -1327,7 +1358,11 @@ int main(int argc, char** argv)
 		}
 		else if (strcmp(arg, "-si") == 0 && i + 1 < argc && isdigit(argv[i + 1][0]))
 		{
-			settings.simplify_threshold = clamp(float(atof(argv[++i])), 0.f, 1.f);
+			settings.simplify_ratio = clamp(float(atof(argv[++i])), 0.f, 1.f);
+		}
+		else if (strcmp(arg, "-se") == 0 && i + 1 < argc && isdigit(argv[i + 1][0]))
+		{
+			settings.simplify_error = clamp(float(atof(argv[++i])), 0.f, 1.f);
 		}
 		else if (strcmp(arg, "-sa") == 0)
 		{
@@ -1525,6 +1560,7 @@ int main(int argc, char** argv)
 			fprintf(stderr, "\t... where C is a comma-separated list (no spaces) with valid values color,normal,attrib\n");
 			fprintf(stderr, "\nSimplification:\n");
 			fprintf(stderr, "\t-si R: simplify meshes targeting triangle/point count ratio R (default: 1; R should be between 0 and 1)\n");
+			fprintf(stderr, "\t-se E: limit simplification error to E (default: 0.01 = 1%% deviation; E should be between 0 and 1)\n");
 			fprintf(stderr, "\t-sa: aggressively simplify to the target ratio disregarding quality\n");
 			fprintf(stderr, "\t-sv: take vertex attributes into account when simplifying meshes\n");
 			fprintf(stderr, "\t-slb: lock border vertices during simplification to avoid gaps on connected meshes\n");

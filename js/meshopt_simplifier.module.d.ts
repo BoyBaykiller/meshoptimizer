@@ -1,6 +1,6 @@
 // This file is part of meshoptimizer library and is distributed under the terms of MIT License.
 // Copyright (C) 2016-2024, by Arseny Kapoulkine (arseny.kapoulkine@gmail.com)
-export type Flags = 'LockBorder' | 'Sparse' | 'ErrorAbsolute';
+export type Flags = 'LockBorder' | 'Sparse' | 'ErrorAbsolute' | 'Prune';
 
 export const MeshoptSimplifier: {
 	supported: boolean;
@@ -16,7 +16,7 @@ export const MeshoptSimplifier: {
 		vertex_positions_stride: number,
 		target_index_count: number,
 		target_error: number,
-		flags?: Flags[],
+		flags?: Flags[]
 	) => [Uint32Array, number];
 
 	// Experimental; requires useExperimentalFeatures to be set to true
@@ -27,10 +27,10 @@ export const MeshoptSimplifier: {
 		vertex_attributes: Float32Array,
 		vertex_attributes_stride: number,
 		attribute_weights: number[],
-		vertex_lock: boolean[] | null,
+		vertex_lock: Uint8Array | null,
 		target_index_count: number,
 		target_error: number,
-		flags?: Flags[],
+		flags?: Flags[]
 	) => [Uint32Array, number];
 
 	getScale: (vertex_positions: Float32Array, vertex_positions_stride: number) => number;
@@ -42,6 +42,6 @@ export const MeshoptSimplifier: {
 		target_vertex_count: number,
 		vertex_colors?: Float32Array,
 		vertex_colors_stride?: number,
-		color_weight?: number,
+		color_weight?: number
 	) => Uint32Array;
 };

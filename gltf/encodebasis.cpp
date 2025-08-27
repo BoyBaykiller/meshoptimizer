@@ -1,21 +1,28 @@
+// This file is part of gltfpack; see gltfpack.h for version/license details
 #ifdef WITH_BASISU
+#include "gltfpack.h"
 
 #define BASISU_NO_ITERATOR_DEBUG_LEVEL
 
 #ifdef __clang__
 #pragma GCC diagnostic ignored "-Wunknown-warning-option"
 #pragma GCC diagnostic ignored "-Warray-bounds"
+#pragma GCC diagnostic ignored "-Wc++17-extensions"
 #pragma GCC diagnostic ignored "-Wdeprecated-builtins"
 #endif
 
 #ifdef __GNUC__
 #pragma GCC diagnostic ignored "-Wclass-memaccess"
+#pragma GCC diagnostic ignored "-Wshadow"
+#pragma GCC diagnostic ignored "-Wunused-local-typedefs"
 #pragma GCC diagnostic ignored "-Wunused-value"
 #endif
 
-#include "encoder/basisu_comp.h"
+#if defined(__GNUC__) && __GNUC__ >= 12
+#pragma GCC diagnostic ignored "-Wc++17-extensions"
+#endif
 
-#include "gltfpack.h"
+#include "encoder/basisu_comp.h"
 
 struct BasisSettings
 {
@@ -46,19 +53,35 @@ static void fillParams(basisu::basis_compressor_params& params, const char* inpu
 
 		params.m_uastc = true;
 
+#if BASISU_LIB_VERSION >= 160
+		params.m_pack_uastc_ldr_4x4_flags &= ~basisu::cPackUASTCLevelMask;
+		params.m_pack_uastc_ldr_4x4_flags |= s_level_flags[bs.uastc_l];
+
+		params.m_rdo_uastc_ldr_4x4 = bs.uastc_q > 0;
+		params.m_rdo_uastc_ldr_4x4_quality_scalar = bs.uastc_q;
+		params.m_rdo_uastc_ldr_4x4_dict_size = 1024;
+#else
 		params.m_pack_uastc_flags &= ~basisu::cPackUASTCLevelMask;
 		params.m_pack_uastc_flags |= s_level_flags[bs.uastc_l];
 
 		params.m_rdo_uastc = bs.uastc_q > 0;
 		params.m_rdo_uastc_quality_scalar = bs.uastc_q;
 		params.m_rdo_uastc_dict_size = 1024;
+#endif
 	}
 	else
 	{
 		params.m_compression_level = bs.etc1s_l;
+
+#if BASISU_LIB_VERSION >= 160
+		params.m_etc1s_quality_level = bs.etc1s_q;
+		params.m_etc1s_max_endpoint_clusters = 0;
+		params.m_etc1s_max_selector_clusters = 0;
+#else
 		params.m_quality_level = bs.etc1s_q;
 		params.m_max_endpoint_clusters = 0;
 		params.m_max_selector_clusters = 0;
+#endif
 
 		params.m_no_selector_rdo = info.normal_map;
 		params.m_no_endpoint_rdo = info.normal_map;
@@ -135,7 +158,7 @@ static const char* prepareEncode(basisu::basis_compressor_params& params, const 
 	if (!getDimensions(img_data, mime_type.c_str(), width, height))
 		return "error parsing image header";
 
-	adjustDimensions(width, height, settings);
+	adjustDimensions(width, height, settings.texture_scale[info.kind], settings.texture_limit[info.kind], settings.texture_pow2);
 
 	temp_input = temp_prefix + mimeExtension(mime_type.c_str());
 	temp_output = temp_prefix + ".ktx2";
@@ -153,7 +176,7 @@ static const char* prepareEncode(basisu::basis_compressor_params& params, const 
 	return NULL;
 }
 
-void encodeImages(std::string* encoded, const cgltf_data* data, const std::vector<ImageInfo>& images, const char* input_path, const Settings& settings)
+void encodeImagesBasis(std::string* encoded, const cgltf_data* data, const std::vector<ImageInfo>& images, const char* input_path, const Settings& settings)
 {
 	basisu::basisu_encoder_init();
 

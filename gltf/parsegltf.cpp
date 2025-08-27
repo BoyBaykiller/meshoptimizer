@@ -66,6 +66,14 @@ static void readAccessor(std::vector<Attr>& data, const cgltf_accessor* accessor
 	}
 }
 
+static void readAccessor(std::vector<Attr>& data, const cgltf_accessor* accessor, const std::vector<unsigned int>& sparse)
+{
+	data.resize(sparse.size());
+
+	for (size_t i = 0; i < sparse.size(); ++i)
+		cgltf_accessor_read_float(accessor, sparse[i], &data[i].f[0], 4);
+}
+
 static void fixupIndices(std::vector<unsigned int>& indices, cgltf_primitive_type& type)
 {
 	if (type == cgltf_primitive_type_line_loop)
@@ -177,9 +185,8 @@ static void parseMeshesGltf(cgltf_data* data, std::vector<Mesh>& meshes, std::ve
 			Mesh& result = meshes.back();
 
 			result.scene = -1;
-
 			result.material = primitive.material;
-
+			result.extras = primitive.extras;
 			result.type = primitive.type;
 
 			result.streams.reserve(primitive.attributes_count);
@@ -197,13 +204,26 @@ static void parseMeshesGltf(cgltf_data* data, std::vector<Mesh>& meshes, std::ve
 			}
 			else if (primitive.type != cgltf_primitive_type_points)
 			{
-				// note, while we could generate a good index buffer, reindexMesh will take care of this
+				// note, while we could generate a good index buffer here, mesh will be reindexed during processing
 				result.indices.resize(vertex_count);
 				for (size_t i = 0; i < vertex_count; ++i)
 					result.indices[i] = unsigned(i);
 			}
 
+			// convert line loops and line/triangle strips to lists
 			fixupIndices(result.indices, result.type);
+
+			std::vector<unsigned int> sparse;
+
+			// if the index data is very sparse, switch to deindexing on the fly to avoid the excessive cost of reading large accessors
+			if (!result.indices.empty() && result.indices.size() < vertex_count / 2)
+			{
+				sparse = result.indices;
+
+				// mesh will be reindexed during processing
+				for (size_t i = 0; i < result.indices.size(); ++i)
+					result.indices[i] = unsigned(i);
+			}
 
 			for (size_t ai = 0; ai < primitive.attributes_count; ++ai)
 			{
@@ -230,7 +250,10 @@ static void parseMeshesGltf(cgltf_data* data, std::vector<Mesh>& meshes, std::ve
 				if (attr.type == cgltf_attribute_type_custom)
 					s.custom_name = attr.name;
 
-				readAccessor(s.data, attr.data);
+				if (sparse.empty())
+					readAccessor(s.data, attr.data);
+				else
+					readAccessor(s.data, attr.data, sparse);
 
 				if (attr.type == cgltf_attribute_type_color && attr.data->type == cgltf_type_vec3)
 				{
@@ -260,7 +283,10 @@ static void parseMeshesGltf(cgltf_data* data, std::vector<Mesh>& meshes, std::ve
 					s.index = attr.index;
 					s.target = int(ti + 1);
 
-					readAccessor(s.data, attr.data);
+					if (sparse.empty())
+						readAccessor(s.data, attr.data);
+					else
+						readAccessor(s.data, attr.data, sparse);
 				}
 			}
 
@@ -310,11 +336,11 @@ static void parseMeshInstancesGltf(std::vector<Transform>& instances, cgltf_node
 	for (size_t i = 0; i < count; ++i)
 	{
 		if (translation)
-			cgltf_accessor_read_float(translation, i, instance.translation, sizeof(float));
+			cgltf_accessor_read_float(translation, i, instance.translation, 4);
 		if (rotation)
-			cgltf_accessor_read_float(rotation, i, instance.rotation, sizeof(float));
+			cgltf_accessor_read_float(rotation, i, instance.rotation, 4);
 		if (scale)
-			cgltf_accessor_read_float(scale, i, instance.scale, sizeof(float));
+			cgltf_accessor_read_float(scale, i, instance.scale, 4);
 
 		Transform xf;
 		cgltf_node_transform_world(&instance, xf.data);
@@ -393,7 +419,7 @@ static void parseAnimationsGltf(cgltf_data* data, std::vector<Animation>& animat
 
 			if (!channel.target_node)
 			{
-				fprintf(stderr, "Warning: ignoring channel %d of animation %d because it has no target node\n", int(j), int(i));
+				fprintf(stderr, "Warning: ignoring channel %d of animation %d (%s) because it has no target node\n", int(j), int(i), animation.name ? animation.name : "");
 				continue;
 			}
 
@@ -413,7 +439,7 @@ static void parseAnimationsGltf(cgltf_data* data, std::vector<Animation>& animat
 
 		if (result.tracks.empty())
 		{
-			fprintf(stderr, "Warning: ignoring animation %d because it has no valid tracks\n", int(i));
+			fprintf(stderr, "Warning: ignoring animation %d (%s) because it has no valid tracks\n", int(i), animation.name ? animation.name : "");
 			animations.pop_back();
 		}
 	}
@@ -516,6 +542,8 @@ static bool freeUnusedBuffers(cgltf_data* data)
 
 static cgltf_result decompressMeshopt(cgltf_data* data)
 {
+	bool warned = false;
+
 	for (size_t i = 0; i < data->buffer_views_count; ++i)
 	{
 		if (!data->buffer_views[i].has_meshopt_compression)
@@ -534,18 +562,22 @@ static cgltf_result decompressMeshopt(cgltf_data* data)
 		data->buffer_views[i].data = result;
 
 		int rc = -1;
+		bool warn = false;
 
 		switch (mc->mode)
 		{
 		case cgltf_meshopt_compression_mode_attributes:
+			warn = meshopt_decodeVertexVersion(source, mc->size) != 0;
 			rc = meshopt_decodeVertexBuffer(result, mc->count, mc->stride, source, mc->size);
 			break;
 
 		case cgltf_meshopt_compression_mode_triangles:
+			warn = meshopt_decodeIndexVersion(source, mc->size) != 1;
 			rc = meshopt_decodeIndexBuffer(result, mc->count, mc->stride, source, mc->size);
 			break;
 
 		case cgltf_meshopt_compression_mode_indices:
+			warn = meshopt_decodeIndexVersion(source, mc->size) != 1;
 			rc = meshopt_decodeIndexSequence(result, mc->count, mc->stride, source, mc->size);
 			break;
 
@@ -555,6 +587,12 @@ static cgltf_result decompressMeshopt(cgltf_data* data)
 
 		if (rc != 0)
 			return cgltf_result_io_error;
+
+		if (warn && !warned)
+		{
+			fprintf(stderr, "Warning: EXT_meshopt_compression data uses versions outside of the glTF specification (vertex 0 / index 1 expected)\n");
+			warned = true;
+		}
 
 		switch (mc->filter)
 		{
@@ -645,4 +683,12 @@ cgltf_data* parseGlb(const void* buffer, size_t size, std::vector<Mesh>& meshes,
 	result = (result == cgltf_result_success) ? decompressMeshopt(data) : result;
 
 	return parseGltf(data, result, meshes, animations, error);
+}
+
+bool areExtrasEqual(const cgltf_extras& lhs, const cgltf_extras& rhs)
+{
+	if (lhs.data && rhs.data)
+		return strcmp(lhs.data, rhs.data) == 0;
+	else
+		return lhs.data == rhs.data;
 }

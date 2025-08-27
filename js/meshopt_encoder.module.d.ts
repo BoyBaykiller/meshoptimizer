@@ -1,5 +1,5 @@
 // This file is part of meshoptimizer library and is distributed under the terms of MIT License.
-// Copyright (C) 2016-2024, by Arseny Kapoulkine (arseny.kapoulkine@gmail.com)
+// Copyright (C) 2016-2025, by Arseny Kapoulkine (arseny.kapoulkine@gmail.com)
 export type ExpMode = 'Separate' | 'SharedVector' | 'SharedComponent' | 'Clamped';
 
 export const MeshoptEncoder: {
@@ -10,6 +10,7 @@ export const MeshoptEncoder: {
 	reorderPoints: (positions: Float32Array, positions_stride: number) => Uint32Array;
 
 	encodeVertexBuffer: (source: Uint8Array, count: number, size: number) => Uint8Array;
+	encodeVertexBufferLevel: (source: Uint8Array, count: number, size: number, level: number, version?: number) => Uint8Array;
 	encodeIndexBuffer: (source: Uint8Array, count: number, size: number) => Uint8Array;
 	encodeIndexSequence: (source: Uint8Array, count: number, size: number) => Uint8Array;
 
@@ -18,4 +19,5 @@ export const MeshoptEncoder: {
 	encodeFilterOct: (source: Float32Array, count: number, stride: number, bits: number) => Uint8Array;
 	encodeFilterQuat: (source: Float32Array, count: number, stride: number, bits: number) => Uint8Array;
 	encodeFilterExp: (source: Float32Array, count: number, stride: number, bits: number, mode?: ExpMode) => Uint8Array;
+	encodeFilterColor: (source: Float32Array, count: number, stride: number, bits: number) => Uint8Array;
 };

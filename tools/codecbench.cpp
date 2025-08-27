@@ -1,5 +1,6 @@
 #include "../src/meshoptimizer.h"
 
+#include <algorithm>
 #include <vector>
 
 #include <stdint.h>
@@ -65,57 +66,46 @@ void benchCodecs(const std::vector<Vertex>& vertices, const std::vector<unsigned
 	if (verbose)
 		printf("source: vertex data %d bytes, index data %d bytes\n", int(vertices.size() * sizeof(Vertex)), int(indices.size() * 4));
 
-	for (int pass = 0; pass < (verbose ? 2 : 1); ++pass)
+	meshopt_optimizeVertexCache(&ib[0], &indices[0], indices.size(), vertices.size());
+
+	meshopt_optimizeVertexFetch(&vb[0], &ib[0], indices.size(), &vertices[0], vertices.size(), sizeof(Vertex));
+
+	vc.resize(vc.capacity());
+	vc.resize(meshopt_encodeVertexBuffer(&vc[0], vc.size(), &vb[0], vertices.size(), sizeof(Vertex)));
+
+	ic.resize(ic.capacity());
+	ic.resize(meshopt_encodeIndexBuffer(&ic[0], ic.size(), &ib[0], indices.size()));
+
+	if (verbose)
+		printf("encode: vertex data %d bytes, index data %d bytes\n", int(vc.size()), int(ic.size()));
+
+	for (int attempt = 0; attempt < 50; ++attempt)
 	{
-		if (pass == 1)
-			meshopt_optimizeVertexCacheStrip(&ib[0], &indices[0], indices.size(), vertices.size());
-		else
-			meshopt_optimizeVertexCache(&ib[0], &indices[0], indices.size(), vertices.size());
+		double t0 = timestamp();
 
-		meshopt_optimizeVertexFetch(&vb[0], &ib[0], indices.size(), &vertices[0], vertices.size(), sizeof(Vertex));
+		int rv = meshopt_decodeVertexBuffer(&vb[0], vertices.size(), sizeof(Vertex), &vc[0], vc.size());
+		assert(rv == 0);
+		(void)rv;
 
-		vc.resize(vc.capacity());
-		vc.resize(meshopt_encodeVertexBuffer(&vc[0], vc.size(), &vb[0], vertices.size(), sizeof(Vertex)));
+		double t1 = timestamp();
 
-		ic.resize(ic.capacity());
-		ic.resize(meshopt_encodeIndexBuffer(&ic[0], ic.size(), &ib[0], indices.size()));
+		int ri = meshopt_decodeIndexBuffer(&ib[0], indices.size(), 4, &ic[0], ic.size());
+		assert(ri == 0);
+		(void)ri;
+
+		double t2 = timestamp();
 
 		if (verbose)
-			printf("pass %d: vertex data %d bytes, index data %d bytes\n", pass, int(vc.size()), int(ic.size()));
+			printf("decode: vertex %.2f ms (%.2f GB/sec), index %.2f ms (%.2f GB/sec)\n",
+			    (t1 - t0) * 1000, double(vertices.size() * sizeof(Vertex)) / 1e9 / (t1 - t0),
+			    (t2 - t1) * 1000, double(indices.size() * 4) / 1e9 / (t2 - t1));
 
-		for (int attempt = 0; attempt < 10; ++attempt)
-		{
-			double t0 = timestamp();
-
-			int rv = meshopt_decodeVertexBuffer(&vb[0], vertices.size(), sizeof(Vertex), &vc[0], vc.size());
-			assert(rv == 0);
-			(void)rv;
-
-			double t1 = timestamp();
-
-			int ri = meshopt_decodeIndexBuffer(&ib[0], indices.size(), 4, &ic[0], ic.size());
-			assert(ri == 0);
-			(void)ri;
-
-			double t2 = timestamp();
-
-			double GB = 1024 * 1024 * 1024;
-
-			if (verbose)
-				printf("decode: vertex %.2f ms (%.2f GB/sec), index %.2f ms (%.2f GB/sec)\n",
-				       (t1 - t0) * 1000, double(vertices.size() * sizeof(Vertex)) / GB / (t1 - t0),
-				       (t2 - t1) * 1000, double(indices.size() * 4) / GB / (t2 - t1));
-
-			if (pass == 0)
-			{
-				bestvd = std::max(bestvd, double(vertices.size() * sizeof(Vertex)) / GB / (t1 - t0));
-				bestid = std::max(bestid, double(indices.size() * 4) / GB / (t2 - t1));
-			}
-		}
+		bestvd = std::max(bestvd, double(vertices.size() * sizeof(Vertex)) / 1e9 / (t1 - t0));
+		bestid = std::max(bestid, double(indices.size() * 4) / 1e9 / (t2 - t1));
 	}
 }
 
-void benchFilters(size_t count, double& besto8, double& besto12, double& bestq12, double& bestexp, bool verbose)
+void benchFilters(size_t count, double& besto8, double& besto12, double& bestq12, double& bestc8, double& bestc12, double& bestexp, bool verbose)
 {
 	// note: the filters are branchless so we just run them on runs of zeroes
 	size_t count4 = (count + 3) & ~3;
@@ -125,7 +115,7 @@ void benchFilters(size_t count, double& besto8, double& besto12, double& bestq12
 	if (verbose)
 		printf("filters: oct8 data %d bytes, oct12/quat12 data %d bytes\n", int(d4.size()), int(d8.size()));
 
-	for (int attempt = 0; attempt < 10; ++attempt)
+	for (int attempt = 0; attempt < 50; ++attempt)
 	{
 		double t0 = timestamp();
 
@@ -141,24 +131,87 @@ void benchFilters(size_t count, double& besto8, double& besto12, double& bestq12
 
 		double t3 = timestamp();
 
-		meshopt_decodeFilterExp(&d8[0], count4, 8);
+		meshopt_decodeFilterColor(&d4[0], count4, 4);
 
 		double t4 = timestamp();
 
-		double GB = 1024 * 1024 * 1024;
+		meshopt_decodeFilterColor(&d8[0], count4, 8);
+
+		double t5 = timestamp();
+
+		meshopt_decodeFilterExp(&d8[0], count4, 8);
+
+		double t6 = timestamp();
 
 		if (verbose)
-			printf("filter: oct8 %.2f ms (%.2f GB/sec), oct12 %.2f ms (%.2f GB/sec), quat12 %.2f ms (%.2f GB/sec), exp %.2f ms (%.2f GB/sec)\n",
-			       (t1 - t0) * 1000, double(d4.size()) / GB / (t1 - t0),
-			       (t2 - t1) * 1000, double(d8.size()) / GB / (t2 - t1),
-			       (t3 - t2) * 1000, double(d8.size()) / GB / (t3 - t2),
-			       (t4 - t3) * 1000, double(d8.size()) / GB / (t4 - t3));
+			printf("filter: oct8 %.2f ms (%.2f GB/sec), oct12 %.2f ms (%.2f GB/sec), quat12 %.2f ms (%.2f GB/sec), col8 %.2f ms (%.2f GB/sec), col12 %.2f ms (%.2f GB/sec), exp %.2f ms (%.2f GB/sec)\n",
+			    (t1 - t0) * 1000, double(d4.size()) / 1e9 / (t1 - t0),
+			    (t2 - t1) * 1000, double(d8.size()) / 1e9 / (t2 - t1),
+			    (t3 - t2) * 1000, double(d8.size()) / 1e9 / (t3 - t2),
+			    (t4 - t3) * 1000, double(d8.size()) / 1e9 / (t4 - t3),
+			    (t5 - t4) * 1000, double(d4.size()) / 1e9 / (t5 - t4),
+			    (t6 - t5) * 1000, double(d8.size()) / 1e9 / (t6 - t5));
 
-		besto8 = std::max(besto8, double(d4.size()) / GB / (t1 - t0));
-		besto12 = std::max(besto12, double(d8.size()) / GB / (t2 - t1));
-		bestq12 = std::max(bestq12, double(d8.size()) / GB / (t3 - t2));
-		bestexp = std::max(bestexp, double(d8.size()) / GB / (t4 - t3));
+		besto8 = std::max(besto8, double(d4.size()) / 1e9 / (t1 - t0));
+		besto12 = std::max(besto12, double(d8.size()) / 1e9 / (t2 - t1));
+		bestq12 = std::max(bestq12, double(d8.size()) / 1e9 / (t3 - t2));
+		bestc8 = std::max(bestc8, double(d4.size()) / 1e9 / (t4 - t3));
+		bestc12 = std::max(bestc12, double(d8.size()) / 1e9 / (t5 - t4));
+		bestexp = std::max(bestexp, double(d8.size()) / 1e9 / (t6 - t5));
 	}
+}
+
+struct File
+{
+	std::vector<unsigned char> v0;
+	std::vector<unsigned char> v1;
+	size_t stride;
+	size_t count;
+};
+
+File readFile(const char* path)
+{
+	FILE* file = fopen(path, "rb");
+	assert(file);
+
+	const char* name = strrchr(path, '/');
+	name = name ? name + 1 : path;
+
+	int vcnt, vsz;
+	int sr = sscanf(name, "v%d_s%d_", &vcnt, &vsz);
+	assert(sr == 2);
+	(void)sr;
+
+	std::vector<unsigned char> input;
+	unsigned char buffer[4096];
+	size_t bytes_read;
+
+	while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) > 0)
+		input.insert(input.end(), buffer, buffer + bytes_read);
+
+	fclose(file);
+
+	File result = {};
+	result.count = vcnt;
+	result.stride = vsz;
+
+	std::vector<unsigned char> decoded(result.count * result.stride);
+	int res = meshopt_decodeVertexBuffer(&decoded[0], result.count, result.stride, &input[0], input.size());
+	if (res != 0 && input.size() == decoded.size())
+	{
+		// some files are not encoded
+		memcpy(decoded.data(), input.data(), decoded.size());
+	}
+
+	meshopt_encodeVertexVersion(0);
+	result.v0.resize(meshopt_encodeVertexBufferBound(result.count, result.stride));
+	result.v0.resize(meshopt_encodeVertexBuffer(result.v0.data(), result.v0.size(), decoded.data(), result.count, result.stride));
+
+	meshopt_encodeVertexVersion(1);
+	result.v1.resize(meshopt_encodeVertexBufferBound(result.count, result.stride));
+	result.v1.resize(meshopt_encodeVertexBuffer(result.v1.data(), result.v1.size(), decoded.data(), result.count, result.stride));
+
+	return result;
 }
 
 int main(int argc, char** argv)
@@ -166,10 +219,77 @@ int main(int argc, char** argv)
 	meshopt_encodeIndexVersion(1);
 
 	bool verbose = false;
+	bool loop = false;
+	bool inputs = false;
 
 	for (int i = 1; i < argc; ++i)
+	{
 		if (strcmp(argv[i], "-v") == 0)
 			verbose = true;
+		if (strcmp(argv[i], "-l") == 0)
+			loop = true;
+		if (argv[i][0] != '-')
+			inputs = true;
+	}
+
+	if (inputs)
+	{
+		std::vector<File> files;
+		for (int i = 1; i < argc; ++i)
+			if (argv[i][0] != '-')
+				files.push_back(readFile(argv[i]));
+
+		size_t max_size = 0;
+		size_t total_size = 0;
+		size_t total_v0 = 0, total_v1 = 0;
+		for (size_t i = 0; i < files.size(); ++i)
+		{
+			max_size = std::max(max_size, files[i].count * files[i].stride);
+			total_size += files[i].count * files[i].stride;
+			total_v0 += files[i].v0.size();
+			total_v1 += files[i].v1.size();
+		}
+
+		std::vector<unsigned char> buffer(max_size);
+
+		printf("Algorithm   :\tvtx0\tvtx1\n");
+		printf("Size (MB)   :\t%.2f\t%.2f\n", double(total_v0) / 1024 / 1024, double(total_v1) / 1024 / 1024);
+		printf("Ratio       :\t%.2f\t%.2f\n", double(total_v0) / double(total_size), double(total_v1) / double(total_size));
+
+		for (int l = 0; l < (loop ? 100 : 1); ++l)
+		{
+			double bestvd0 = 0, bestvd1 = 0;
+
+			for (int attempt = 0; attempt < 50; ++attempt)
+			{
+				double t0 = timestamp();
+
+				for (size_t i = 0; i < files.size(); ++i)
+				{
+					int rv = meshopt_decodeVertexBuffer(&buffer[0], files[i].count, files[i].stride, &files[i].v0[0], files[i].v0.size());
+					assert(rv == 0);
+					(void)rv;
+				}
+
+				double t1 = timestamp();
+
+				for (size_t i = 0; i < files.size(); ++i)
+				{
+					int rv = meshopt_decodeVertexBuffer(&buffer[0], files[i].count, files[i].stride, &files[i].v1[0], files[i].v1.size());
+					assert(rv == 0);
+					(void)rv;
+				}
+
+				double t2 = timestamp();
+
+				bestvd0 = std::max(bestvd0, double(total_size) / 1e9 / (t1 - t0));
+				bestvd1 = std::max(bestvd1, double(total_size) / 1e9 / (t2 - t1));
+			}
+
+			printf("Score (GB/s):\t%.2f\t%.2f\n", bestvd0, bestvd1);
+		}
+		return 0;
+	}
 
 	const int N = 1000;
 
@@ -212,13 +332,24 @@ int main(int argc, char** argv)
 		}
 	}
 
-	double bestvd = 0, bestid = 0;
-	benchCodecs(vertices, indices, bestvd, bestid, verbose);
+	printf("Algorithm   :\tvtx0\tvtx1\tidx\toct8\toct12\tquat12\tcol8\tcol12\texp\n");
 
-	double besto8 = 0, besto12 = 0, bestq12 = 0, bestexp = 0;
-	benchFilters(8 * N * N, besto8, besto12, bestq12, bestexp, verbose);
+	for (int l = 0; l < (loop ? 100 : 1); ++l)
+	{
+		meshopt_encodeVertexVersion(0);
 
-	printf("Algorithm   :\tvtx\tidx\toct8\toct12\tquat12\texp\n");
-	printf("Score (GB/s):\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\n",
-	       bestvd, bestid, besto8, besto12, bestq12, bestexp);
+		double bestvd0 = 0, bestid = 0;
+		benchCodecs(vertices, indices, bestvd0, bestid, verbose);
+
+		meshopt_encodeVertexVersion(1);
+
+		double bestvd1 = 0, bestidr = 0;
+		benchCodecs(vertices, indices, bestvd1, bestidr, verbose);
+
+		double besto8 = 0, besto12 = 0, bestq12 = 0, bestc8 = 0, bestc12 = 0, bestexp = 0;
+		benchFilters(8 * N * N, besto8, besto12, bestq12, bestc8, bestc12, bestexp, verbose);
+
+		printf("Score (GB/s):\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\n",
+		    bestvd0, bestvd1, bestid, besto8, besto12, bestq12, bestc8, bestc12, bestexp);
+	}
 }

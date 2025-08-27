@@ -50,12 +50,31 @@ static const PV kVertexBuffer[] = {
 };
 
 static const unsigned char kVertexDataV0[] = {
-    0xa0, 0x01, 0x3f, 0x00, 0x00, 0x00, 0x58, 0x57, 0x58, 0x01, 0x26, 0x00, 0x00, 0x00, 0x01,
-    0x0c, 0x00, 0x00, 0x00, 0x58, 0x01, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x3f, 0x00, 0x00, 0x00, 0x17, 0x18, 0x17, 0x01, 0x26, 0x00, 0x00, 0x00, 0x01, 0x0c, 0x00,
-    0x00, 0x00, 0x17, 0x01, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // clang-format :-/
+    0xa0, 0x01, 0x3f, 0x00, 0x00, 0x00, 0x58, 0x57, 0x58, 0x01, 0x26, 0x00, 0x00, 0x00, 0x01, 0x0c,
+    0x00, 0x00, 0x00, 0x58, 0x01, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x3f, 0x00,
+    0x00, 0x00, 0x17, 0x18, 0x17, 0x01, 0x26, 0x00, 0x00, 0x00, 0x01, 0x0c, 0x00, 0x00, 0x00, 0x17,
+    0x01, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, // clang-format :-/
+};
+
+static const unsigned char kVertexDataV1[] = {
+    0xa1, 0xee, 0xaa, 0xee, 0x00, 0x4b, 0x4b, 0x4b, 0x00, 0x00, 0x4b, 0x00, 0x00, 0x7d, 0x7d, 0x7d,
+    0x00, 0x00, 0x7d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x62, 0x00, 0x62, // clang-format :-/
+};
+
+// This binary blob is a valid v1 encoding of vertex buffer but it used a custom version of
+// the encoder that exercised all features of the format; because of this it is much larger
+// and will never be produced by the encoder itself.
+static const unsigned char kVertexDataV1Custom[] = {
+    0xa1, 0xd4, 0x94, 0xd4, 0x01, 0x0e, 0x00, 0x58, 0x57, 0x58, 0x02, 0x02, 0x12, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x58, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x0e, 0x00, 0x7d, 0x7d, 0x7d, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7d, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x62, // clang-format :-/
 };
 
 static void decodeIndexV0()
@@ -78,6 +97,40 @@ static void decodeIndexV1()
 	unsigned int decoded[index_count];
 	assert(meshopt_decodeIndexBuffer(decoded, index_count, &buffer[0], buffer.size()) == 0);
 	assert(memcmp(decoded, kIndexBufferTricky, sizeof(kIndexBufferTricky)) == 0);
+}
+
+static void decodeIndexV1More()
+{
+	const unsigned char input[] = {
+	    0xe1, 0xf0, 0x10, 0xfe, 0xff, 0xf0, 0x0c, 0xff, 0x02, 0x02, 0x02, 0x00, 0x76, 0x87, 0x56, 0x67,
+	    0x78, 0xa9, 0x86, 0x65, 0x89, 0x68, 0x98, 0x01, 0x69, 0x00, 0x00, // clang-format
+	};
+
+	const unsigned int ib[] = {0, 1, 2, 2, 1, 3, 4, 6, 5, 7, 8, 9};
+	const size_t index_count = sizeof(ib) / sizeof(ib[0]);
+
+	std::vector<unsigned char> buffer(input, input + sizeof(input));
+
+	unsigned int decoded[index_count];
+	assert(meshopt_decodeIndexBuffer(decoded, index_count, 4, &buffer[0], buffer.size()) == 0);
+	assert(memcmp(decoded, ib, sizeof(ib)) == 0);
+}
+
+static void decodeIndexV1ThreeEdges()
+{
+	const unsigned char input[] = {
+	    0xe1, 0xf0, 0x20, 0x30, 0x40, 0x00, 0x76, 0x87, 0x56, 0x67, 0x78, 0xa9, 0x86, 0x65, 0x89, 0x68,
+	    0x98, 0x01, 0x69, 0x00, 0x00, // clang-format
+	};
+
+	const unsigned int ib[] = {0, 1, 2, 1, 0, 3, 2, 1, 4, 0, 2, 5};
+	const size_t index_count = sizeof(ib) / sizeof(ib[0]);
+
+	std::vector<unsigned char> buffer(input, input + sizeof(input));
+
+	unsigned int decoded[index_count];
+	assert(meshopt_decodeIndexBuffer(decoded, index_count, 4, &buffer[0], buffer.size()) == 0);
+	assert(memcmp(decoded, ib, sizeof(ib)) == 0);
 }
 
 static void decodeIndex16()
@@ -358,6 +411,72 @@ static void decodeVertexV0()
 	assert(memcmp(decoded, kVertexBuffer, sizeof(kVertexBuffer)) == 0);
 }
 
+static void decodeVertexV0More()
+{
+	const unsigned char expected[] = {
+	    0, 0, 0, 0, 0, 1, 2, 8, 0, 2, 4, 16, 0, 3, 6, 24,
+	    0, 4, 8, 32, 0, 5, 10, 40, 0, 6, 12, 48, 0, 7, 14, 56,
+	    0, 8, 16, 64, 0, 9, 18, 72, 0, 10, 20, 80, 0, 11, 22, 88,
+	    0, 12, 24, 96, 0, 13, 26, 104, 0, 14, 28, 112, 0, 15, 30, 120, // clang-format :-/
+	};
+
+	const unsigned char input[] = {
+	    0xa0, 0x00, 0x01, 0x2a, 0xaa, 0xaa, 0xaa, 0x02, 0x04, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44,
+	    0x03, 0x00, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10,
+	    0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	    0x00, // clang-format :-/
+	};
+
+	unsigned char decoded[sizeof(expected)];
+	assert(meshopt_decodeVertexBuffer(decoded, 16, 4, input, sizeof(input)) == 0);
+	assert(memcmp(decoded, expected, sizeof(expected)) == 0);
+}
+
+static void decodeVertexV0Mode2()
+{
+	const unsigned char expected[] = {
+	    0, 0, 0, 0, 4, 5, 6, 7, 8, 10, 12, 14, 12, 15, 18, 21,
+	    16, 20, 24, 28, 20, 25, 30, 35, 24, 30, 36, 42, 28, 35, 42, 49,
+	    32, 40, 48, 56, 36, 45, 54, 63, 40, 50, 60, 70, 44, 55, 66, 77,
+	    48, 60, 72, 84, 52, 65, 78, 91, 56, 70, 84, 98, 60, 75, 90, 105, // clang-format :-/
+	};
+
+	const unsigned char input[] = {
+	    0xa0, 0x02, 0x08, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x02, 0x0a, 0xaa, 0xaa, 0xaa, 0xaa,
+	    0xaa, 0xaa, 0xaa, 0x02, 0x0c, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0x02, 0x0e, 0xee, 0xee,
+	    0xee, 0xee, 0xee, 0xee, 0xee, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	    0x00, 0x00, 0x00, 0x00, 0x00, // clang-format :-/
+	};
+
+	unsigned char decoded[sizeof(expected)];
+	assert(meshopt_decodeVertexBuffer(decoded, 16, 4, input, sizeof(input)) == 0);
+	assert(memcmp(decoded, expected, sizeof(expected)) == 0);
+}
+
+static void decodeVertexV1()
+{
+	const size_t vertex_count = sizeof(kVertexBuffer) / sizeof(kVertexBuffer[0]);
+
+	std::vector<unsigned char> buffer(kVertexDataV1, kVertexDataV1 + sizeof(kVertexDataV1));
+
+	PV decoded[vertex_count];
+	assert(meshopt_decodeVertexBuffer(decoded, vertex_count, sizeof(PV), &buffer[0], buffer.size()) == 0);
+	assert(memcmp(decoded, kVertexBuffer, sizeof(kVertexBuffer)) == 0);
+}
+
+static void decodeVertexV1Custom()
+{
+	const size_t vertex_count = sizeof(kVertexBuffer) / sizeof(kVertexBuffer[0]);
+
+	std::vector<unsigned char> buffer(kVertexDataV1Custom, kVertexDataV1Custom + sizeof(kVertexDataV1Custom));
+
+	PV decoded[vertex_count];
+	assert(meshopt_decodeVertexBuffer(decoded, vertex_count, sizeof(PV), &buffer[0], buffer.size()) == 0);
+	assert(memcmp(decoded, kVertexBuffer, sizeof(kVertexBuffer)) == 0);
+}
+
 static void encodeVertexMemorySafe()
 {
 	const size_t vertex_count = sizeof(kVertexBuffer) / sizeof(kVertexBuffer[0]);
@@ -483,6 +602,48 @@ static void decodeVertexBitGroupSentinels()
 	assert(memcmp(decoded, data, sizeof(data)) == 0);
 }
 
+static void decodeVertexDeltas()
+{
+	unsigned short data[16 * 4];
+
+	// this forces wider deltas by using values that cross byte boundary
+	for (size_t i = 0; i < 16; ++i)
+	{
+		data[i * 4 + 0] = (unsigned short)(0xf8 + i * 1);
+		data[i * 4 + 1] = (unsigned short)(0xf8 + i * 2);
+		data[i * 4 + 2] = (unsigned short)(0xf0 + i * 3);
+		data[i * 4 + 3] = (unsigned short)(0xf0 + i * 4);
+	}
+
+	std::vector<unsigned char> buffer(meshopt_encodeVertexBufferBound(16, 8));
+	buffer.resize(meshopt_encodeVertexBufferLevel(&buffer[0], buffer.size(), data, 16, 8, 2, -1));
+
+	unsigned short decoded[16 * 4];
+	assert(meshopt_decodeVertexBuffer(decoded, 16, 8, &buffer[0], buffer.size()) == 0);
+	assert(memcmp(decoded, data, sizeof(data)) == 0);
+}
+
+static void decodeVertexBitXor()
+{
+	unsigned int data[16 * 4];
+
+	// this forces xors by using bit values at an offset
+	for (size_t i = 0; i < 16; ++i)
+	{
+		data[i * 4 + 0] = unsigned(i << 0);
+		data[i * 4 + 1] = unsigned(i << 2);
+		data[i * 4 + 2] = unsigned(i << 15);
+		data[i * 4 + 3] = unsigned(i << 28);
+	}
+
+	std::vector<unsigned char> buffer(meshopt_encodeVertexBufferBound(16, 16));
+	buffer.resize(meshopt_encodeVertexBufferLevel(&buffer[0], buffer.size(), data, 16, 16, 3, -1));
+
+	unsigned int decoded[16 * 4];
+	assert(meshopt_decodeVertexBuffer(decoded, 16, 16, &buffer[0], buffer.size()) == 0);
+	assert(memcmp(decoded, data, sizeof(data)) == 0);
+}
+
 static void decodeVertexLarge()
 {
 	unsigned char data[128 * 4];
@@ -504,12 +665,52 @@ static void decodeVertexLarge()
 	assert(memcmp(decoded, data, sizeof(data)) == 0);
 }
 
+static void decodeVertexSmall()
+{
+	unsigned char data[13 * 4];
+
+	// this tests 0/2/4/8 bit groups in one stream
+	for (size_t i = 0; i < 13; ++i)
+	{
+		data[i * 4 + 0] = 0;
+		data[i * 4 + 1] = (unsigned char)(i * 1);
+		data[i * 4 + 2] = (unsigned char)(i * 2);
+		data[i * 4 + 3] = (unsigned char)(i * 8);
+	}
+
+	std::vector<unsigned char> buffer(meshopt_encodeVertexBufferBound(13, 4));
+	buffer.resize(meshopt_encodeVertexBuffer(&buffer[0], buffer.size(), data, 13, 4));
+
+	unsigned char decoded[13 * 4];
+	assert(meshopt_decodeVertexBuffer(decoded, 13, 4, &buffer[0], buffer.size()) == 0);
+	assert(memcmp(decoded, data, sizeof(data)) == 0);
+}
+
 static void encodeVertexEmpty()
 {
 	std::vector<unsigned char> buffer(meshopt_encodeVertexBufferBound(0, 16));
 	buffer.resize(meshopt_encodeVertexBuffer(&buffer[0], buffer.size(), NULL, 0, 16));
 
 	assert(meshopt_decodeVertexBuffer(NULL, 0, 16, &buffer[0], buffer.size()) == 0);
+}
+
+static void decodeVersion()
+{
+	assert(meshopt_decodeVertexVersion(reinterpret_cast<const unsigned char*>("\xa0"), 1) == 0);
+	assert(meshopt_decodeVertexVersion(reinterpret_cast<const unsigned char*>("\xa1"), 1) == 1);
+	assert(meshopt_decodeVertexVersion(reinterpret_cast<const unsigned char*>("\xa1hello"), 6) == 1);
+
+	assert(meshopt_decodeVertexVersion(NULL, 0) == -1);
+	assert(meshopt_decodeVertexVersion(reinterpret_cast<const unsigned char*>("\xa7"), 1) == -1);
+	assert(meshopt_decodeVertexVersion(reinterpret_cast<const unsigned char*>("\xb1"), 1) == -1);
+
+	assert(meshopt_decodeIndexVersion(reinterpret_cast<const unsigned char*>("\xe0"), 1) == 0);
+	assert(meshopt_decodeIndexVersion(reinterpret_cast<const unsigned char*>("\xd1"), 1) == 1);
+	assert(meshopt_decodeIndexVersion(reinterpret_cast<const unsigned char*>("\xe1hello"), 6) == 1);
+
+	assert(meshopt_decodeIndexVersion(NULL, 0) == -1);
+	assert(meshopt_decodeIndexVersion(reinterpret_cast<const unsigned char*>("\xa7"), 1) == -1);
+	assert(meshopt_decodeIndexVersion(reinterpret_cast<const unsigned char*>("\xa1"), 1) == -1);
 }
 
 static void decodeFilterOct8()
@@ -903,6 +1104,70 @@ static void encodeFilterExpClamp()
 		assert(fabsf(decoded[i] - data[i]) < 1e-3f);
 }
 
+static void encodeFilterColor8()
+{
+	const float data[4 * 4] = {
+	    1.0f, 0.0f, 0.0f, 1.0f,
+	    0.0f, 1.0f, 0.0f, 0.5f,
+	    0.0f, 0.0f, 1.0f, 0.25f,
+	    0.4f, 0.4f, 0.4f, 0.75f, // clang-format :-/
+	};
+
+	const unsigned char expected[4 * 4] = {
+	    0x40, 0x7f, 0xc1, 0xff,
+	    0x7f, 0x00, 0x7f, 0xc0,
+	    0x40, 0x81, 0xc0, 0xa0,
+	    0x66, 0x00, 0x00, 0xdf, // clang-format :-/
+	};
+
+	unsigned char encoded[4 * 4];
+	meshopt_encodeFilterColor(encoded, 4, 4, 8, data);
+
+	assert(memcmp(encoded, expected, sizeof(expected)) == 0);
+
+	unsigned char decoded[4 * 4];
+	memcpy(decoded, encoded, sizeof(decoded));
+	meshopt_decodeFilterColor(decoded, 4, 4);
+
+	for (size_t i = 0; i < 4 * 4; ++i)
+		assert(fabsf(decoded[i] / 255.f - data[i]) < 1e-2f);
+
+	// ensure grayscale is preserved
+	assert(decoded[12] == decoded[13] && decoded[12] == decoded[14]);
+}
+
+static void encodeFilterColor12()
+{
+	const float data[4 * 4] = {
+	    1.0f, 0.0f, 0.0f, 1.0f,
+	    0.0f, 1.0f, 0.0f, 0.5f,
+	    0.0f, 0.0f, 1.0f, 0.25f,
+	    0.4f, 0.4f, 0.4f, 0.75f, // clang-format :-/
+	};
+
+	const unsigned short expected[4 * 4] = {
+	    0x0400, 0x07ff, 0xfc01, 0x0fff,
+	    0x07ff, 0x0000, 0x07ff, 0x0c00,
+	    0x0400, 0xf801, 0xfc00, 0x0a00,
+	    0x0666, 0x0000, 0x0000, 0x0dff, // clang-format :-/
+	};
+
+	unsigned short encoded[4 * 4];
+	meshopt_encodeFilterColor(encoded, 4, 8, 12, data);
+
+	assert(memcmp(encoded, expected, sizeof(expected)) == 0);
+
+	unsigned short decoded[4 * 4];
+	memcpy(decoded, encoded, sizeof(decoded));
+	meshopt_decodeFilterColor(decoded, 4, 8);
+
+	for (size_t i = 0; i < 4 * 4; ++i)
+		assert(fabsf(decoded[i] / 65535.f - data[i]) < 1e-3f);
+
+	// ensure grayscale is preserved
+	assert(decoded[12] == decoded[13] && decoded[12] == decoded[14]);
+}
+
 static void clusterBoundsDegenerate()
 {
 	const float vbd[] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -934,6 +1199,342 @@ static void clusterBoundsDegenerate()
 	assert(bounds2.center[0] - bounds2.radius <= 0 && bounds2.center[0] + bounds2.radius >= 1);
 	assert(bounds2.center[1] - bounds2.radius <= 0 && bounds2.center[1] + bounds2.radius >= 1);
 	assert(bounds2.center[2] - bounds2.radius <= 0 && bounds2.center[2] + bounds2.radius >= 1);
+}
+
+static void sphereBounds()
+{
+	const float vbr[] = {
+	    0, 0, 0, 0,
+	    0, 1, 0, 1,
+	    0, 0, 1, 2,
+	    1, 0, 1, 3, // clang-format
+	};
+
+	// without the radius, the center is inside the tetrahedron
+	meshopt_Bounds bounds = meshopt_computeSphereBounds(vbr, 4, sizeof(float) * 4, NULL, 0);
+	assert(fabsf(bounds.center[0] - 0.5f) < 1e-2f);
+	assert(fabsf(bounds.center[1] - 0.5f) < 1e-2f);
+	assert(fabsf(bounds.center[2] - 0.5f) < 1e-2f);
+	assert(bounds.radius < 0.87f);
+
+	// when using the radius, the last sphere envelops the entire set
+	meshopt_Bounds boundsr = meshopt_computeSphereBounds(vbr, 4, sizeof(float) * 4, vbr + 3, sizeof(float) * 4);
+	assert(fabsf(boundsr.center[0] - 1.f) < 1e-2f);
+	assert(fabsf(boundsr.center[1] - 0.f) < 1e-2f);
+	assert(fabsf(boundsr.center[2] - 1.f) < 1e-2f);
+	assert(fabsf(boundsr.radius - 3.f) < 1e-2f);
+}
+
+static void meshletsEmpty()
+{
+	const float vbd[4 * 3] = {};
+
+	meshopt_Meshlet ml[1];
+	unsigned int mv[4];
+	unsigned char mt[8];
+	size_t mc = meshopt_buildMeshlets(ml, mv, mt, NULL, 0, vbd, 4, sizeof(float) * 3, 64, 64, 0.f);
+	assert(mc == 0);
+}
+
+static void meshletsDense()
+{
+	const float vbd[4 * 3] = {};
+	const unsigned int ibd[6] = {0, 2, 1, 1, 2, 3};
+
+	meshopt_Meshlet ml[1];
+	unsigned int mv[4];
+	unsigned char mt[8];
+	size_t mc = meshopt_buildMeshlets(ml, mv, mt, ibd, 6, vbd, 4, sizeof(float) * 3, 64, 64, 0.f);
+
+	assert(mc == 1);
+	assert(ml[0].triangle_count == 2);
+	assert(ml[0].vertex_count == 4);
+
+	unsigned int tri0[3] = {mv[mt[0]], mv[mt[1]], mv[mt[2]]};
+	unsigned int tri1[3] = {mv[mt[3]], mv[mt[4]], mv[mt[5]]};
+
+	// technically triangles could also be flipped in the meshlet but for now just assume they aren't
+	assert(memcmp(tri0, ibd + 0, 3 * sizeof(unsigned int)) == 0);
+	assert(memcmp(tri1, ibd + 3, 3 * sizeof(unsigned int)) == 0);
+}
+
+static void meshletsSparse()
+{
+	const float vbd[16 * 3] = {};
+	const unsigned int ibd[6] = {0, 7, 15, 15, 7, 3};
+
+	meshopt_Meshlet ml[1];
+	unsigned int mv[4];
+	unsigned char mt[8];
+	size_t mc = meshopt_buildMeshlets(ml, mv, mt, ibd, 6, vbd, 16, sizeof(float) * 3, 64, 64, 0.f);
+
+	assert(mc == 1);
+	assert(ml[0].triangle_count == 2);
+	assert(ml[0].vertex_count == 4);
+
+	unsigned int tri0[3] = {mv[mt[0]], mv[mt[1]], mv[mt[2]]};
+	unsigned int tri1[3] = {mv[mt[3]], mv[mt[4]], mv[mt[5]]};
+
+	// technically triangles could also be flipped in the meshlet but for now just assume they aren't
+	assert(memcmp(tri0, ibd + 0, 3 * sizeof(unsigned int)) == 0);
+	assert(memcmp(tri1, ibd + 3, 3 * sizeof(unsigned int)) == 0);
+}
+
+static void meshletsFlex()
+{
+	// two tetrahedrons far apart
+	float vb[2 * 4 * 3] = {
+	    0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1,
+	    10, 0, 0, 11, 0, 0, 10, 1, 0, 10, 0, 1, // clang-format :-/
+	};
+
+	unsigned int ib[2 * 4 * 3] = {
+	    0, 1, 2, 0, 2, 3, 0, 3, 1, 1, 3, 2,
+	    4, 5, 6, 4, 6, 7, 4, 7, 5, 5, 7, 6, // clang-format :-/
+	};
+
+	// up to 2 meshlets with min_triangles=4
+	assert(meshopt_buildMeshletsBound(2 * 4 * 3, 16, 4) == 2);
+
+	meshopt_Meshlet ml[2];
+	unsigned int mv[2 * 16];
+	unsigned char mt[2 * 8 * 3]; // 2 meshlets with up to 8 triangles
+
+	// with regular function, we should get one meshlet (maxt=8) or two (maxt=4)
+	assert(meshopt_buildMeshlets(ml, mv, mt, ib, sizeof(ib) / sizeof(ib[0]), vb, 8, sizeof(float) * 3, 16, 8, 0.f) == 1);
+	assert(ml[0].triangle_count == 8);
+	assert(ml[0].vertex_count == 8);
+
+	assert(meshopt_buildMeshlets(ml, mv, mt, ib, sizeof(ib) / sizeof(ib[0]), vb, 8, sizeof(float) * 3, 16, 4, 0.f) == 2);
+	assert(ml[0].triangle_count == 4);
+	assert(ml[0].vertex_count == 4);
+	assert(ml[1].triangle_count == 4);
+	assert(ml[1].vertex_count == 4);
+
+	// with flex function and mint=4 maxt=8 we should get one meshlet if split_factor is zero, or large enough to accomodate both
+	assert(meshopt_buildMeshletsFlex(ml, mv, mt, ib, sizeof(ib) / sizeof(ib[0]), vb, 8, sizeof(float) * 3, 16, 4, 8, 0.f, 0.f) == 1);
+	assert(ml[0].triangle_count == 8);
+	assert(ml[0].vertex_count == 8);
+
+	assert(meshopt_buildMeshletsFlex(ml, mv, mt, ib, sizeof(ib) / sizeof(ib[0]), vb, 8, sizeof(float) * 3, 16, 4, 8, 0.f, 10.f) == 1);
+	assert(ml[0].triangle_count == 8);
+	assert(ml[0].vertex_count == 8);
+
+	// however, with a smaller split factor we should get two meshlets
+	assert(meshopt_buildMeshletsFlex(ml, mv, mt, ib, sizeof(ib) / sizeof(ib[0]), vb, 8, sizeof(float) * 3, 16, 4, 8, 0.f, 1.f) == 2);
+	assert(ml[0].triangle_count == 4);
+	assert(ml[0].vertex_count == 4);
+	assert(ml[1].triangle_count == 4);
+	assert(ml[1].vertex_count == 4);
+}
+
+static void meshletsMax()
+{
+	float vb[16 * 16 * 3];
+	unsigned int ib[15 * 15 * 2 * 3];
+
+	// 16x16 grid of vertices, 15x15 grid of triangles
+	for (int y = 0; y < 16; ++y)
+		for (int x = 0; x < 16; ++x)
+		{
+			vb[(y * 16 + x) * 3 + 0] = float(x);
+			vb[(y * 16 + x) * 3 + 1] = float(y);
+			vb[(y * 16 + x) * 3 + 2] = 0;
+		}
+
+	for (int y = 0; y < 15; ++y)
+		for (int x = 0; x < 15; ++x)
+		{
+			ib[(y * 15 + x) * 2 * 3 + 0] = (y + 0) * 16 + (x + 0);
+			ib[(y * 15 + x) * 2 * 3 + 1] = (y + 0) * 16 + (x + 1);
+			ib[(y * 15 + x) * 2 * 3 + 2] = (y + 1) * 16 + (x + 0);
+			ib[(y * 15 + x) * 2 * 3 + 3] = (y + 1) * 16 + (x + 0);
+			ib[(y * 15 + x) * 2 * 3 + 4] = (y + 0) * 16 + (x + 1);
+			ib[(y * 15 + x) * 2 * 3 + 5] = (y + 1) * 16 + (x + 1);
+		}
+
+	meshopt_Meshlet ml[1];
+	unsigned int mv[16 * 16];
+	unsigned char mt[15 * 15 * 2 * 3 + 3];
+
+	size_t mc = meshopt_buildMeshlets(ml, mv, mt, ib, sizeof(ib) / sizeof(ib[0]), vb, 16 * 16, sizeof(float) * 3, 256, 512, 0.f);
+	assert(mc == 1);
+	assert(ml[0].triangle_count == 450);
+	assert(ml[0].vertex_count == 256);
+
+	meshopt_optimizeMeshlet(mv, mt, ml[0].triangle_count, ml[0].vertex_count);
+
+	// check sequential ordering of remapped indices
+	int vmax = -1;
+
+	for (size_t i = 0; i < 450 * 3; ++i)
+	{
+		assert(mt[i] <= vmax + 1);
+		vmax = vmax < mt[i] ? mt[i] : vmax;
+	}
+}
+
+static void meshletsSpatial()
+{
+	// two tetrahedrons far apart
+	float vb[2 * 4 * 3] = {
+	    0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1,
+	    10, 0, 0, 11, 0, 0, 10, 1, 0, 10, 0, 1, // clang-format :-/
+	};
+
+	unsigned int ib[2 * 4 * 3] = {
+	    0, 1, 2, 0, 2, 3, 0, 3, 1, 1, 3, 2,
+	    4, 5, 6, 4, 6, 7, 4, 7, 5, 5, 7, 6, // clang-format :-/
+	};
+
+	// up to 2 meshlets with min_triangles=4
+	assert(meshopt_buildMeshletsBound(2 * 4 * 3, 16, 4) == 2);
+
+	meshopt_Meshlet ml[2];
+	unsigned int mv[2 * 16];
+	unsigned char mt[2 * 8 * 3]; // 2 meshlets with up to 8 triangles
+
+	// with strict limits, we should get one meshlet (maxt=8) or two (maxt=4)
+	assert(meshopt_buildMeshletsSpatial(ml, mv, mt, ib, sizeof(ib) / sizeof(ib[0]), vb, 8, sizeof(float) * 3, 16, 8, 8, 0.f) == 1);
+	assert(ml[0].triangle_count == 8);
+	assert(ml[0].vertex_count == 8);
+
+	assert(meshopt_buildMeshletsSpatial(ml, mv, mt, ib, sizeof(ib) / sizeof(ib[0]), vb, 8, sizeof(float) * 3, 16, 4, 4, 0.f) == 2);
+	assert(ml[0].triangle_count == 4);
+	assert(ml[0].vertex_count == 4);
+	assert(ml[1].triangle_count == 4);
+	assert(ml[1].vertex_count == 4);
+
+	// with maxv=4 we should get two meshlets since we can't accomodate both
+	assert(meshopt_buildMeshletsSpatial(ml, mv, mt, ib, sizeof(ib) / sizeof(ib[0]), vb, 8, sizeof(float) * 3, 4, 4, 8, 0.f) == 2);
+	assert(ml[0].triangle_count == 4);
+	assert(ml[0].vertex_count == 4);
+	assert(ml[1].triangle_count == 4);
+	assert(ml[1].vertex_count == 4);
+}
+
+static void meshletsSpatialDeep()
+{
+	const int N = 400;
+	const size_t max_vertices = 4;
+	const size_t max_triangles = 4;
+
+	float vb[(N + 1) * 3];
+	unsigned int ib[N * 3];
+
+	vb[0] = vb[1] = vb[2] = 0;
+
+	for (size_t i = 0; i < N; ++i)
+	{
+		vb[(i + 1) * 3 + 0] = vb[(i + 1) * 3 + 1] = vb[(i + 1) * 3 + 2] = powf(1.2f, float(i));
+
+		ib[i * 3 + 0] = 0;
+		ib[i * 3 + 1] = ib[i * 3 + 2] = unsigned(i + 1);
+	}
+
+	size_t max_meshlets = meshopt_buildMeshletsBound(N * 3, max_vertices, max_triangles);
+	std::vector<meshopt_Meshlet> meshlets(max_meshlets);
+	std::vector<unsigned int> meshlet_vertices(max_meshlets * max_vertices);
+	std::vector<unsigned char> meshlet_triangles(max_meshlets * max_triangles * 3);
+
+	size_t result = meshopt_buildMeshletsSpatial(&meshlets[0], &meshlet_vertices[0], &meshlet_triangles[0], &ib[0], N * 3, &vb[0], N + 1, sizeof(float) * 3, max_vertices, max_triangles, max_triangles, 0.f);
+	assert(result == N);
+}
+
+static void partitionBasic()
+{
+	// 0   1   2
+	//     3
+	// 4 5 6 7 8
+	//     9
+	// 10 11  12
+	const unsigned int ci[] = {
+	    0, 1, 3, 4, 5, 6,
+	    1, 2, 3, 6, 7, 8,
+	    4, 5, 6, 9, 10, 11,
+	    6, 7, 8, 9, 11, 12, // clang-format :-/
+	};
+
+	const unsigned int cc[4] = {6, 6, 6, 6};
+	unsigned int part[4];
+
+	assert(meshopt_partitionClusters(part, ci, sizeof(ci) / sizeof(ci[0]), cc, 4, NULL, 13, 0, 1) == 4);
+	assert(part[0] == 0 && part[1] == 1 && part[2] == 2 && part[3] == 3);
+
+	assert(meshopt_partitionClusters(part, ci, sizeof(ci) / sizeof(ci[0]), cc, 4, NULL, 13, 0, 2) == 2);
+	assert(part[0] == 0 && part[1] == 0 && part[2] == 1 && part[3] == 1);
+
+	assert(meshopt_partitionClusters(part, ci, sizeof(ci) / sizeof(ci[0]), cc, 4, NULL, 13, 0, 4) == 1);
+	assert(part[0] == 0 && part[1] == 0 && part[2] == 0 && part[3] == 0);
+}
+
+static void partitionSpatial()
+{
+	const unsigned int ci[] = {
+	    0, 1, 2,
+	    0, 3, 4,
+	    0, 5, 6, // clang-format :-/
+	};
+
+	const float vb[] = {
+	    0, 0, 0,
+	    1, 0, 0, 0, 1, 0,
+	    0, 2, 0, 2, 0, 0,
+	    -1, 0, 0, 0, -1, 0, // clang-format :-/
+	};
+
+	const unsigned int cc[3] = {3, 3, 3};
+	unsigned int part[3];
+
+	assert(meshopt_partitionClusters(part, ci, sizeof(ci) / sizeof(ci[0]), cc, 3, NULL, 7, 0, 2) == 2);
+	assert(part[0] == 0 && part[1] == 0 && part[2] == 1);
+
+	assert(meshopt_partitionClusters(part, ci, sizeof(ci) / sizeof(ci[0]), cc, 3, vb, 7, sizeof(float) * 3, 2) == 2);
+	assert(part[0] == 0 && part[1] == 1 && part[2] == 0);
+}
+
+static int remapCustomFalse(void*, unsigned int, unsigned int)
+{
+	return 0;
+}
+
+static int remapCustomTrue(void*, unsigned int, unsigned int)
+{
+	return 1;
+}
+
+static void remapCustom()
+{
+	const float vb[] = {
+	    0, 0, 0,
+	    1, 0, 0,
+	    0, 1, 0,
+	    0, 0, 1,
+	    1, 0, 0,
+	    0, -0.f, 1, // clang-format
+	};
+
+	unsigned int remap[6];
+	size_t res;
+
+	res = meshopt_generateVertexRemapCustom(remap, NULL, 6, vb, 6, sizeof(float) * 3, NULL, NULL);
+	assert(res == 4);
+	for (int i = 0; i < 4; ++i)
+		assert(remap[i] == unsigned(i));
+	assert(remap[4] == 1);
+	assert(remap[5] == 3);
+
+	res = meshopt_generateVertexRemapCustom(remap, NULL, 6, vb, 6, sizeof(float) * 3, remapCustomTrue, NULL);
+	assert(res == 4);
+	for (int i = 0; i < 4; ++i)
+		assert(remap[i] == unsigned(i));
+	assert(remap[4] == 1);
+	assert(remap[5] == 3);
+
+	res = meshopt_generateVertexRemapCustom(remap, NULL, 6, vb, 6, sizeof(float) * 3, remapCustomFalse, NULL);
+	assert(res == 6);
+	for (int i = 0; i < 6; ++i)
+		assert(remap[i] == unsigned(i));
 }
 
 static size_t allocCount;
@@ -1024,7 +1625,7 @@ static void simplify()
 
 	float error;
 	assert(meshopt_simplify(ib, ib, 12, vb, 6, 12, 3, 1e-2f, 0, &error) == 3);
-	assert(error == 0.f);
+	assert(error < 1e-4f);
 	assert(memcmp(ib, expected, sizeof(expected)) == 0);
 }
 
@@ -1069,6 +1670,45 @@ static void simplifySloppyStuck()
 
 	// simplifying down to 2 triangles given that all triangles are degenerate results in 0 as well
 	assert(meshopt_simplifySloppy(target, ib, 6, vb, 3, 12, 6, 0.f) == 0);
+}
+
+static void simplifySloppyLocks()
+{
+	// 0
+	// 1 2
+	// 3 4 5
+	unsigned int ib[] = {
+	    0, 2, 1,
+	    1, 2, 3,
+	    3, 2, 4,
+	    2, 5, 4, // clang-format :-/
+	};
+
+	float vb[] = {
+	    0, 4, 0,
+	    0, 1, 0,
+	    2, 2, 0,
+	    0, 0, 0,
+	    1, 0, 0,
+	    4, 0, 0, // clang-format :-/
+	};
+
+	// lock spine
+	unsigned char locks[] = {1, 0, 1, 0, 0, 1};
+
+	unsigned int expected[] = {
+	    0,
+	    2,
+	    1,
+	    1,
+	    2,
+	    5,
+	};
+
+	float error;
+	assert(meshopt_simplifySloppy(ib, ib, 12, vb, 6, 12, locks, 3, 1.f, &error) == 6);
+	assert(error == 0.f);
+	assert(memcmp(ib, expected, sizeof(expected)) == 0);
 }
 
 static void simplifyPointsStuck()
@@ -1549,12 +2189,12 @@ static void simplifySeam()
 
 	assert(meshopt_simplify(res, ib, 36, vb, 16, 16, 12, 1.f, 0, &error) == 12);
 	assert(memcmp(res, expected, sizeof(expected)) == 0);
-	assert(fabsf(error - 0.09f) < 0.01f); // note: the error is not zero because there is a difference in height between the seam vertices
+	assert(fabsf(error - 0.1f) < 0.01f); // note: the error is not zero because there is a difference in height between the seam vertices
 
 	float aw = 1;
 	assert(meshopt_simplifyWithAttributes(res, ib, 36, vb, 16, 16, vb + 3, 16, &aw, 1, NULL, 12, 2.f, 0, &error) == 12);
 	assert(memcmp(res, expected, sizeof(expected)) == 0);
-	assert(fabsf(error - 0.09f) < 0.01f); // note: this is the same error as above because the attribute is constant on either side of the seam
+	assert(fabsf(error - 0.1f) < 0.01f); // note: this is the same error as above because the attribute is constant on either side of the seam
 }
 
 static void simplifySeamFake()
@@ -1573,6 +2213,61 @@ static void simplifySeamFake()
 	};
 
 	assert(meshopt_simplify(ib, ib, 6, vb, 4, 16, 0, 1.f, 0, NULL) == 6);
+}
+
+static void simplifySeamAttr()
+{
+	// xyz+attr
+	float vb[] = {
+	    0, 0, 0, 0,
+	    0, 1, 0, 0,
+	    0, 1, 0, 0,
+	    0, 2, 0, 0,
+	    1, 0, 0, 1,
+	    1, 1, 0, 1,
+	    1, 1, 0, 1,
+	    1, 2, 0, 1,
+	    4, 0, 0, 2,
+	    4, 1, 0, 2,
+	    4, 1, 0, 2,
+	    4, 2, 0, 2, // clang-format :-/
+	};
+
+	// 0   1-2   3
+	// 4   5-6   7
+	// 8   9-10 11
+
+	unsigned int ib[] = {
+	    0, 1, 4,
+	    4, 1, 5,
+	    2, 3, 6,
+	    6, 3, 7,
+	    4, 5, 8,
+	    8, 5, 9,
+	    6, 7, 10,
+	    10, 7, 11, // clang-format :-/
+	};
+
+	// note: vertices 1-2 and 9-10 are classified as locked, because they are on a seam & a border
+	// 0   1-2   3
+	// 4         7
+	// 8   9-10 11
+	unsigned int expected[] = {
+	    0, 1, 4,
+	    2, 3, 7,
+	    4, 1, 8,
+	    8, 1, 9,
+	    2, 7, 10,
+	    10, 7, 11, // clang-format :-/
+	};
+
+	unsigned int res[24];
+	float error = 0.f;
+
+	float aw = 1;
+	assert(meshopt_simplifyWithAttributes(res, ib, 24, vb, 12, 16, vb + 3, 16, &aw, 1, NULL, 12, 2.f, meshopt_SimplifyLockBorder, &error) == 18);
+	assert(memcmp(res, expected, sizeof(expected)) == 0);
+	assert(fabsf(error - 0.35f) < 0.01f);
 }
 
 static void simplifyDebug()
@@ -1606,7 +2301,7 @@ static void simplifyDebug()
 
 	float error;
 	assert(meshopt_simplify(ib, ib, 12, vb, 6, 12, 3, 1e-2f, meshopt_SimplifyInternalDebug, &error) == 3);
-	assert(error == 0.f);
+	assert(error < 1e-4f);
 	assert(memcmp(ib, expected, sizeof(expected)) == 0);
 }
 
@@ -1618,9 +2313,9 @@ static void simplifyPrune()
 	// +
 	// 6 7 8 (same position)
 	unsigned int ib[] = {
+	    3, 2, 4,
 	    0, 2, 1,
 	    1, 2, 3,
-	    3, 2, 4,
 	    2, 5, 4,
 	    6, 7, 8, // clang-format :-/
 	};
@@ -1645,7 +2340,7 @@ static void simplifyPrune()
 
 	float error;
 	assert(meshopt_simplify(ib, ib, 15, vb, 9, 12, 3, 1e-2f, meshopt_SimplifyPrune, &error) == 3);
-	assert(error == 0.f);
+	assert(error < 1e-4f);
 	assert(memcmp(ib, expected, sizeof(expected)) == 0);
 
 	// re-run prune with and without sparsity on a small subset to make sure the component code correctly handles sparse subsets
@@ -1683,6 +2378,36 @@ static void simplifyPruneCleanup()
 	float error;
 	assert(meshopt_simplify(ib, ib, 9, vb, 9, 12, 3, 1.f, meshopt_SimplifyLockBorder | meshopt_SimplifyPrune, &error) == 3);
 	assert(fabsf(error - 0.37f) < 0.01f);
+	assert(memcmp(ib, expected, sizeof(expected)) == 0);
+}
+
+static void simplifyPruneFunc()
+{
+	unsigned int ib[] = {
+	    0, 1, 2,
+	    3, 4, 5,
+	    6, 7, 8, // clang-format :-/
+	};
+
+	float vb[] = {
+	    0, 0, 0,
+	    0, 1, 0,
+	    1, 0, 0,
+	    0, 0, 1,
+	    0, 2, 1,
+	    2, 0, 1,
+	    0, 0, 2,
+	    0, 4, 2,
+	    4, 0, 2, // clang-format :-/
+	};
+
+	unsigned int expected[] = {
+	    6,
+	    7,
+	    8,
+	};
+
+	assert(meshopt_simplifyPrune(ib, ib, 9, vb, 9, 12, 0.5f) == 3);
 	assert(memcmp(ib, expected, sizeof(expected)) == 0);
 }
 
@@ -1881,6 +2606,8 @@ void runTests()
 {
 	decodeIndexV0();
 	decodeIndexV1();
+	decodeIndexV1More();
+	decodeIndexV1ThreeEdges();
 	decodeIndex16();
 	encodeIndexMemorySafe();
 	decodeIndexMemorySafe();
@@ -1901,14 +2628,29 @@ void runTests()
 	encodeIndexSequenceEmpty();
 
 	decodeVertexV0();
-	encodeVertexMemorySafe();
-	decodeVertexMemorySafe();
-	decodeVertexRejectExtraBytes();
-	decodeVertexRejectMalformedHeaders();
-	decodeVertexBitGroups();
-	decodeVertexBitGroupSentinels();
-	decodeVertexLarge();
-	encodeVertexEmpty();
+	decodeVertexV0More();
+	decodeVertexV0Mode2();
+	decodeVertexV1();
+	decodeVertexV1Custom();
+
+	for (int version = 0; version <= 1; ++version)
+	{
+		meshopt_encodeVertexVersion(version);
+
+		decodeVertexMemorySafe();
+		decodeVertexRejectExtraBytes();
+		decodeVertexRejectMalformedHeaders();
+		decodeVertexBitGroups();
+		decodeVertexBitGroupSentinels();
+		decodeVertexDeltas();
+		decodeVertexBitXor();
+		decodeVertexLarge();
+		decodeVertexSmall();
+		encodeVertexEmpty();
+		encodeVertexMemorySafe();
+	}
+
+	decodeVersion();
 
 	decodeFilterOct8();
 	decodeFilterOct12();
@@ -1922,8 +2664,24 @@ void runTests()
 	encodeFilterExpZero();
 	encodeFilterExpAlias();
 	encodeFilterExpClamp();
+	encodeFilterColor8();
+	encodeFilterColor12();
 
 	clusterBoundsDegenerate();
+	sphereBounds();
+
+	meshletsEmpty();
+	meshletsDense();
+	meshletsSparse();
+	meshletsFlex();
+	meshletsMax();
+	meshletsSpatial();
+	meshletsSpatialDeep();
+
+	partitionBasic();
+	partitionSpatial();
+
+	remapCustom();
 
 	customAllocator();
 
@@ -1932,6 +2690,7 @@ void runTests()
 	simplify();
 	simplifyStuck();
 	simplifySloppyStuck();
+	simplifySloppyLocks();
 	simplifyPointsStuck();
 	simplifyFlip();
 	simplifyScale();
@@ -1945,9 +2704,11 @@ void runTests()
 	simplifyErrorAbsolute();
 	simplifySeam();
 	simplifySeamFake();
+	simplifySeamAttr();
 	simplifyDebug();
 	simplifyPrune();
 	simplifyPruneCleanup();
+	simplifyPruneFunc();
 
 	adjacency();
 	tessellation();

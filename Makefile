@@ -55,7 +55,7 @@ WASM_SIMPLIFIER_SOURCES=src/simplifier.cpp src/vfetchoptimizer.cpp src/indexgene
 WASM_SIMPLIFIER_EXPORTS=meshopt_simplify meshopt_simplifyWithAttributes meshopt_simplifyWithUpdate meshopt_simplifyScale meshopt_simplifyPoints meshopt_simplifySloppy meshopt_simplifyPrune meshopt_optimizeVertexFetchRemap meshopt_generatePositionRemap sbrk __wasm_call_ctors
 
 WASM_CLUSTERIZER_SOURCES=src/clusterizer.cpp tools/wasmstubs.cpp
-WASM_CLUSTERIZER_EXPORTS=meshopt_buildMeshletsBound meshopt_buildMeshlets meshopt_computeClusterBounds meshopt_computeMeshletBounds meshopt_computeSphereBounds meshopt_optimizeMeshlet sbrk __wasm_call_ctors
+WASM_CLUSTERIZER_EXPORTS=meshopt_buildMeshletsBound meshopt_buildMeshletsFlex meshopt_buildMeshletsSpatial meshopt_computeClusterBounds meshopt_computeMeshletBounds meshopt_computeSphereBounds meshopt_optimizeMeshlet sbrk __wasm_call_ctors
 
 ifneq ($(werror),)
 	CFLAGS+=-Werror
@@ -84,6 +84,10 @@ endif
 ifeq ($(config),coverage)
 	CXXFLAGS+=-coverage
 	LDFLAGS+=-coverage
+endif
+
+ifeq ($(config),release-avx)
+	CXXFLAGS+=-O3 -DNDEBUG -mavx
 endif
 
 ifeq ($(config),release-avx512)
@@ -137,7 +141,7 @@ format:
 formatjs:
 	prettier -w js/*.js gltf/*.js demo/*.html js/*.ts
 
-js: js/meshopt_decoder.js js/meshopt_decoder.module.js js/meshopt_encoder.js js/meshopt_encoder.module.js js/meshopt_simplifier.js js/meshopt_simplifier.module.js js/meshopt_clusterizer.js js/meshopt_clusterizer.module.js
+js: js/meshopt_decoder.cjs js/meshopt_decoder.mjs js/meshopt_encoder.js js/meshopt_simplifier.js js/meshopt_clusterizer.js
 
 symbols: $(BUILD)/amalgamated.so
 	nm $< -U -g
@@ -181,7 +185,7 @@ build/clusterizer.wasm: $(WASM_CLUSTERIZER_SOURCES)
 	@mkdir -p build
 	$(WASMCC) $^ $(WASM_FLAGS) $(patsubst %,$(WASM_EXPORT_PREFIX)=%,$(WASM_CLUSTERIZER_EXPORTS)) -lc -o $@
 
-js/meshopt_decoder.js: build/decoder_base.wasm build/decoder_simd.wasm tools/wasmpack.py
+js/meshopt_decoder.mjs: build/decoder_base.wasm build/decoder_simd.wasm tools/wasmpack.py
 	sed -i "s#Built with clang.*#Built with $$($(WASMCC) --version | head -n 1 | sed 's/\s\+(.*//')#" $@
 	sed -i "s#Built from meshoptimizer .*#Built from meshoptimizer $$(cat src/meshoptimizer.h | grep -Po '(?<=version )[0-9.]+')#" $@
 	python3 tools/wasmpack.py patch $@ base <build/decoder_base.wasm
@@ -196,10 +200,12 @@ js/meshopt_encoder.js js/meshopt_simplifier.js js/meshopt_clusterizer.js:
 	sed -i "s#Built from meshoptimizer .*#Built from meshoptimizer $$(cat src/meshoptimizer.h | grep -Po '(?<=version )[0-9.]+')#" $@
 	python3 tools/wasmpack.py patch $@ wasm <$<
 
-js/%.module.js: js/%.js
-	sed '\#// export!#q' <$< >$@
-	sed -i "/use strict.;/d" $@
-	sed -i "s#// export! \(.*\)#export { \\1 };#" $@
+js/meshopt_decoder.cjs: js/meshopt_decoder.mjs
+	sed '/export {/d' <$< >$@
+	echo "if (typeof exports === 'object' && typeof module === 'object') module.exports = MeshoptDecoder;" >>$@
+	echo "else if (typeof define === 'function' && define['amd']) define([], function () { return MeshoptDecoder; });" >>$@
+	echo "else if (typeof exports === 'object') exports['MeshoptDecoder'] = MeshoptDecoder;" >>$@
+	echo "else (typeof self !== 'undefined' ? self : this).MeshoptDecoder = MeshoptDecoder;" >>$@
 
 $(DEMO): $(DEMO_OBJECTS) $(LIBRARY)
 	$(CXX) $^ $(LDFLAGS) -o $@
@@ -225,7 +231,7 @@ codecbench-simd.wasm: tools/codecbench.cpp $(LIBRARY_SOURCES)
 codectest: tools/codectest.cpp $(LIBRARY)
 	$(CXX) $^ $(CXXFLAGS) $(LDFLAGS) -o $@
 
-codecfuzz: tools/codecfuzz.cpp src/vertexcodec.cpp src/indexcodec.cpp
+codecfuzz: tools/codecfuzz.cpp src/vertexcodec.cpp src/indexcodec.cpp src/meshletcodec.cpp
 	$(CXX) $^ -fsanitize=fuzzer,address,undefined -O1 -g -o $@
 
 clusterfuzz: tools/clusterfuzz.cpp src/clusterizer.cpp

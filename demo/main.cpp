@@ -538,8 +538,8 @@ void simplifyClusters(const Mesh& mesh, float threshold = 0.2f)
 	// build clusters (meshlets) out of the mesh
 	size_t max_meshlets = meshopt_buildMeshletsBound(mesh.indices.size(), max_vertices, max_triangles);
 	std::vector<meshopt_Meshlet> meshlets(max_meshlets);
-	std::vector<unsigned int> meshlet_vertices(max_meshlets * max_vertices);
-	std::vector<unsigned char> meshlet_triangles(max_meshlets * max_triangles * 3);
+	std::vector<unsigned int> meshlet_vertices(mesh.indices.size());
+	std::vector<unsigned char> meshlet_triangles(mesh.indices.size());
 
 	meshlets.resize(meshopt_buildMeshlets(&meshlets[0], &meshlet_vertices[0], &meshlet_triangles[0], &mesh.indices[0], mesh.indices.size(), &mesh.vertices[0].px, mesh.vertices.size(), sizeof(Vertex), max_vertices, max_triangles, 0.f));
 
@@ -617,7 +617,7 @@ void simplifyClusters(const Mesh& mesh, float threshold = 0.2f)
 		size_t group_triangles = (lod.size() - group_offset) / 3;
 
 		// simplify the group, preserving the border vertices
-		// note: this technically also locks the exterior border; a full mesh analysis (see nanite.cpp / lockBoundary) would work better for some meshes
+		// note: this technically also locks the exterior border; a full mesh analysis (see clusterlod.h / lockBoundary) would work better for some meshes
 		unsigned int options = meshopt_SimplifyLockBorder | meshopt_SimplifySparse | meshopt_SimplifyErrorAbsolute;
 
 		float group_target_error = 1e-2f * scale;
@@ -633,12 +633,12 @@ void simplifyClusters(const Mesh& mesh, float threshold = 0.2f)
 
 	double end = timestamp();
 
-	printf("%-9s: %d triangles => %d triangles (%.2f%% deviation) in %.2f msec, clusterized in %.2f msec, partitioned in %.2f msec (%d clusters in %d groups)\n",
-	    "SimplifyN", // N for Nanite
+	printf("%-9s: %d triangles => %d triangles (%.2f%% deviation) in %.2f msec, clusterized in %.2f msec, partitioned in %.2f msec (%d clusters in %d groups, %.1f avg)\n",
+	    "SimplifyG",
 	    int(mesh.indices.size() / 3), int(lod.size() / 3),
 	    error / scale * 100,
 	    (end - parttime) * 1000, (middle - start) * 1000, (parttime - middle) * 1000,
-	    int(meshlets.size()), int(partition_count));
+	    int(meshlets.size()), int(partition_count), double(meshlets.size()) / double(partition_count));
 }
 
 void optimize(const Mesh& mesh, bool fifo = false)
@@ -758,6 +758,136 @@ void encodeIndexSequence(const std::vector<unsigned int>& data, size_t vertex_co
 	    (double(result.size() * 4) / 1e9) / (middle - start),
 	    (end - middle) * 1000,
 	    (double(result.size() * 4) / 1e9) / (end - middle));
+}
+
+template <typename V, typename T>
+static void validateDecodeMeshlet(const unsigned char* data, size_t size, const unsigned int* vertices, size_t vertex_count, const unsigned char* triangles, size_t triangle_count)
+{
+	V rv[256];
+	T rt[sizeof(T) == 1 ? 256 * 3 : 256];
+
+	int rc = meshopt_decodeMeshlet(rv, vertex_count, rt, triangle_count, data, size);
+	assert(rc == 0);
+
+	for (size_t j = 0; j < vertex_count; ++j)
+		assert(rv[j] == V(vertices[j]));
+
+	for (size_t j = 0; j < triangle_count; ++j)
+	{
+		unsigned int a = triangles[j * 3 + 0];
+		unsigned int b = triangles[j * 3 + 1];
+		unsigned int c = triangles[j * 3 + 2];
+
+		unsigned int tri = sizeof(T) == 1 ? rt[j * 3] | (rt[j * 3 + 1] << 8) | (rt[j * 3 + 2] << 16) : rt[j];
+
+		unsigned int abc = (a << 0) | (b << 8) | (c << 16);
+		unsigned int bca = (b << 0) | (c << 8) | (a << 16);
+		unsigned int cba = (c << 0) | (a << 8) | (b << 16);
+
+		assert(tri == abc || tri == bca || tri == cba);
+	}
+}
+
+void encodeMeshlets(const Mesh& mesh, size_t max_vertices, size_t max_triangles, bool reorder = true)
+{
+	size_t max_meshlets = meshopt_buildMeshletsBound(mesh.indices.size(), max_vertices, max_triangles);
+	std::vector<meshopt_Meshlet> meshlets(max_meshlets);
+	std::vector<unsigned int> meshlet_vertices(mesh.indices.size());
+	std::vector<unsigned char> meshlet_triangles(mesh.indices.size());
+
+	meshlets.resize(meshopt_buildMeshlets(&meshlets[0], &meshlet_vertices[0], &meshlet_triangles[0], &mesh.indices[0], mesh.indices.size(), &mesh.vertices[0].px, mesh.vertices.size(), sizeof(Vertex), max_vertices, max_triangles, 0.f));
+
+	if (meshlets.size())
+	{
+		const meshopt_Meshlet& last = meshlets.back();
+
+		// this is an example of how to trim the vertex/triangle arrays when copying data out to GPU storage
+		meshlet_vertices.resize(last.vertex_offset + last.vertex_count);
+		meshlet_triangles.resize(last.triangle_offset + last.triangle_count * 3);
+
+		// TODO: over-allocate meshlet_vertices to multiple of 3 to make meshopt_optimizeVertexFetch below work without assertions
+		meshlet_vertices.resize((meshlet_vertices.size() + 2) / 3 * 3);
+	}
+
+	std::vector<unsigned char> cbuf(meshopt_encodeMeshletBound(max_vertices, max_triangles));
+
+	// optimize each meshlet for locality; this is important for performance, and critical for good compression
+	for (size_t i = 0; i < meshlets.size(); ++i)
+		meshopt_optimizeMeshlet(&meshlet_vertices[meshlets[i].vertex_offset], &meshlet_triangles[meshlets[i].triangle_offset], meshlets[i].triangle_count, meshlets[i].vertex_count);
+
+	// optimize the order of vertex references within each meshlet and globally; this is valuable for access locality and critical for compression of vertex references
+	// note that this reorders the vertex buffer too, so if a traditional index buffer is required it would need to be reconstructed from the meshlet data for optimal locality
+	std::vector<Vertex> vertices = mesh.vertices;
+	if (reorder)
+		meshopt_optimizeVertexFetch(&vertices[0], &meshlet_vertices[0], meshlet_vertices.size(), &mesh.vertices[0], mesh.vertices.size(), sizeof(Vertex));
+
+	size_t mbst = 0;
+
+	std::vector<unsigned char> packed;
+
+	for (size_t i = 0; i < meshlets.size(); ++i)
+	{
+		const meshopt_Meshlet& meshlet = meshlets[i];
+
+		size_t mbs = meshopt_encodeMeshlet(&cbuf[0], cbuf.size(), &meshlet_vertices[meshlet.vertex_offset], meshlet.vertex_count, &meshlet_triangles[meshlet.triangle_offset], meshlet.triangle_count);
+		assert(mbs > 0);
+
+		// 24-bit header: 7 bit (vertex_count-1), 7 bit (triangle_count-1), 10 bit size
+		// fits up to 128v/128t meshlet with 1024 bytes of encoded data; meshopt_encodeMeshletBound(128,128) < 1000
+		assert(size_t(meshlet.vertex_count - 1) < 128 && size_t(meshlet.triangle_count - 1) < 128 && mbs < 1024);
+		unsigned int header = ((meshlet.vertex_count - 1) & 0x7f) | (((meshlet.triangle_count - 1) & 0x7f) << 7) | ((unsigned(mbs) & 0x3ff) << 14);
+		packed.push_back((unsigned char)(header & 0xff));
+		packed.push_back((unsigned char)((header >> 8) & 0xff));
+		packed.push_back((unsigned char)((header >> 16) & 0xff));
+		packed.insert(packed.end(), &cbuf[0], &cbuf[mbs]);
+
+		validateDecodeMeshlet<unsigned int, unsigned int>(&cbuf[0], mbs, &meshlet_vertices[meshlet.vertex_offset], meshlet.vertex_count, &meshlet_triangles[meshlet.triangle_offset], meshlet.triangle_count);
+		validateDecodeMeshlet<unsigned int, unsigned char>(&cbuf[0], mbs, &meshlet_vertices[meshlet.vertex_offset], meshlet.vertex_count, &meshlet_triangles[meshlet.triangle_offset], meshlet.triangle_count);
+		validateDecodeMeshlet<unsigned short, unsigned int>(&cbuf[0], mbs, &meshlet_vertices[meshlet.vertex_offset], meshlet.vertex_count, &meshlet_triangles[meshlet.triangle_offset], meshlet.triangle_count);
+		validateDecodeMeshlet<unsigned short, unsigned char>(&cbuf[0], mbs, &meshlet_vertices[meshlet.vertex_offset], meshlet.vertex_count, &meshlet_triangles[meshlet.triangle_offset], meshlet.triangle_count);
+
+		mbst += mbs;
+	}
+
+	size_t mbc = compress(packed);
+
+	printf("MeshletCodec (%d/%d): %d meshlets, %d bytes/meshlet; %d bytes, %.1f bits/triangle\n",
+	    int(max_vertices), int(max_triangles),
+	    int(meshlets.size()),
+	    int(mbst / meshlets.size()),
+	    int(mbst), double(mbst * 8) / double(mesh.indices.size() / 3));
+	printf("MeshletCodec (%d/%d, packed): %d bytes/meshlet, %.1f bits/triangle; post-deflate: %d bytes/meshlet, %.1f bits/triangle)\n",
+	    int(max_vertices), int(max_triangles),
+	    int(packed.size() / meshlets.size()), double(packed.size() * 8) / double(mesh.indices.size() / 3),
+	    int(mbc / meshlets.size()), double(mbc * 8) / double(mesh.indices.size() / 3));
+
+#if !TRACE
+	double mbtime = 0;
+
+	for (int i = 0; i < 10; ++i)
+	{
+		unsigned int rv[256];
+		unsigned int rt[256];
+		double t0 = timestamp();
+		unsigned char* p = &packed[0];
+		for (size_t j = 0; j < meshlets.size(); ++j)
+		{
+			unsigned int header = p[0] | (p[1] << 8) | (p[2] << 16);
+			size_t vertex_count = (header & 0x7f) + 1;
+			size_t triangle_count = ((header >> 7) & 0x7f) + 1;
+			size_t size = (header >> 14) & 0x3ff;
+			meshopt_decodeMeshletRaw(rv, vertex_count, rt, triangle_count, p + 3, size);
+			p += 3 + size;
+		}
+		double t1 = timestamp();
+
+		mbtime = (mbtime == 0 || t1 - t0 < mbtime) ? (t1 - t0) : mbtime;
+	}
+
+	printf("MeshletCodec (%d/%d, packed): decode time %.3f msec, %.3fB tri/sec, %.1f ns/meshlet\n",
+	    int(max_vertices), int(max_triangles),
+	    mbtime * 1000, double(mesh.indices.size() / 3) / 1e9 / mbtime, mbtime * 1e9 / double(meshlets.size()));
+#endif
 }
 
 template <typename PV>
@@ -886,10 +1016,9 @@ static int follow(int* parents, int index)
 
 void meshlets(const Mesh& mesh, bool scan = false, bool uniform = false, bool flex = false, bool spatial = false, bool dump = false)
 {
-	// NVidia-recommends 64/126; we round 126 down to a multiple of 4
-	// alternatively we also test uniform configuration with 64/64 which is better for AMD
+	// NVidia recommends 64/126; we also test uniform configuration with 64/64 which is better for earlier AMD GPUs
 	const size_t max_vertices = 64;
-	const size_t max_triangles = uniform ? 64 : 124;
+	const size_t max_triangles = uniform ? 64 : 126;
 	const size_t min_triangles = spatial ? 16 : (uniform ? 24 : 32); // only used in flex/spatial modes
 
 	// note: should be set to 0 unless cone culling is used at runtime!
@@ -900,8 +1029,8 @@ void meshlets(const Mesh& mesh, bool scan = false, bool uniform = false, bool fl
 	double start = timestamp();
 	size_t max_meshlets = meshopt_buildMeshletsBound(mesh.indices.size(), max_vertices, min_triangles);
 	std::vector<meshopt_Meshlet> meshlets(max_meshlets);
-	std::vector<unsigned int> meshlet_vertices(max_meshlets * max_vertices);
-	std::vector<unsigned char> meshlet_triangles(max_meshlets * max_triangles * 3);
+	std::vector<unsigned int> meshlet_vertices(mesh.indices.size());
+	std::vector<unsigned char> meshlet_triangles(mesh.indices.size());
 
 	if (scan)
 		meshlets.resize(meshopt_buildMeshletsScan(&meshlets[0], &meshlet_vertices[0], &meshlet_triangles[0], &mesh.indices[0], mesh.indices.size(), mesh.vertices.size(), max_vertices, max_triangles));
@@ -922,7 +1051,7 @@ void meshlets(const Mesh& mesh, bool scan = false, bool uniform = false, bool fl
 
 		// this is an example of how to trim the vertex/triangle arrays when copying data out to GPU storage
 		meshlet_vertices.resize(last.vertex_offset + last.vertex_count);
-		meshlet_triangles.resize(last.triangle_offset + ((last.triangle_count * 3 + 3) & ~3));
+		meshlet_triangles.resize(last.triangle_offset + last.triangle_count * 3);
 	}
 
 	double end = timestamp();
@@ -1426,11 +1555,14 @@ void process(const char* path)
 	encodeVertex<PackedVertex>(copy, "");
 	encodeVertex<PackedVertexOct>(copy, "O");
 
+	encodeMeshlets(mesh, 64, 96);
+
 	simplify(mesh);
 	simplify(mesh, 0.1f, meshopt_SimplifyPrune);
 	simplifyAttr(mesh);
 	simplifyAttr(mesh, 0.1f, meshopt_SimplifyPermissive);
 	simplifyUpdate(mesh);
+	simplifyUpdate(mesh, 0.1f, meshopt_SimplifyPermissive);
 	simplifySloppy(mesh);
 	simplifyComplete(mesh);
 	simplifyPoints(mesh);
@@ -1453,7 +1585,9 @@ void processDev(const char* path)
 	if (!loadMesh(mesh, path))
 		return;
 
-	simplifyUpdate(mesh, 0.1f, meshopt_SimplifyPrune | meshopt_SimplifyPermissive);
+	encodeMeshlets(mesh, 32, 48);
+	encodeMeshlets(mesh, 64, 64);
+	encodeMeshlets(mesh, 64, 96);
 }
 
 void processNanite(const char* path)
@@ -1468,9 +1602,6 @@ void processNanite(const char* path)
 int main(int argc, char** argv)
 {
 	void runTests();
-
-	meshopt_encodeVertexVersion(1);
-	meshopt_encodeIndexVersion(1);
 
 	if (argc == 1)
 	{
